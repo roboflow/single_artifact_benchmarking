@@ -9,7 +9,7 @@ import json
 from tqdm import tqdm
 
 
-def evaluate(inference, image_dir: str, annotations_file_path: str, output_file_name: str="predictions.json"):
+def evaluate(inference, image_dir: str, annotations_file_path: str, class_mapping: dict[int, str]|None=None, output_file_name: str="predictions.json"):
     predictions = []
 
     coco_annotations = COCO(annotations_file_path)
@@ -45,7 +45,7 @@ def evaluate(inference, image_dir: str, annotations_file_path: str, output_file_
             predictions.append({
                 "image_id": image_id,
                 "bbox": this_xywh.tolist(),
-                "category_id": int(this_class_id),
+                "category_id": class_mapping[int(this_class_id)] if class_mapping is not None else int(this_class_id),
                 "score": float(this_score)
             })
 
