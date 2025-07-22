@@ -42,20 +42,24 @@ class TRTInference:
         
         self.context = self.engine.create_execution_context()
 
-        self.input_names = [self.engine.get_binding_name(i) for i in range(self.engine.num_bindings) if self.engine.binding_is_input(i)]
-        self.output_names = [self.engine.get_binding_name(i) for i in range(self.engine.num_bindings) if not self.engine.binding_is_input(i)]
-        self.output_shapes = [list(self.engine.get_binding_shape(name)) for name in self.output_names]
+        names = [self.engine.get_tensor_name(i) for i in range(self.engine.num_io_tensors)]
+
+        self.input_names = [name for name in names if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT]
+        self.output_names = [name for name in names if self.engine.get_tensor_mode(name) == trt.TensorIOMode.OUTPUT]
+        self.output_shapes = [list(self.engine.get_tensor_shape(name)) for name in self.output_names]
 
         self.initialize_bindings()
 
         # Cache binding indices
         self.input_binding_idxs = {
-            name: self.engine.get_binding_index(name) 
-            for name in self.input_names
+            name: i
+            for i, name in enumerate(names)
+            if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT
         }
         self.output_binding_idxs = {
-            name: self.engine.get_binding_index(name) 
-            for name in self.output_names
+            name: i
+            for i, name in enumerate(names)
+            if self.engine.get_tensor_mode(name) == trt.TensorIOMode.OUTPUT
         }
 
         if len(self.input_names) != 1 and image_input_name is None:
@@ -64,7 +68,7 @@ class TRTInference:
             assert image_input_name in self.input_names, f"Image input name {image_input_name} not found in model inputs"
         
         self.image_input_name = image_input_name if image_input_name is not None else self.input_names[0]
-        self.image_input_shape = self.engine.get_binding_shape(self.image_input_name)
+        self.image_input_shape = self.engine.get_tensor_shape(self.image_input_name)
 
         self.profiler = CUDAProfiler()
     
@@ -78,7 +82,7 @@ class TRTInference:
         
         input_image = input_image.contiguous()
 
-        bindings = [None] * self.engine.num_bindings
+        bindings = [None] * self.engine.num_io_tensors
 
         for name, binding_idx in self.output_binding_idxs.items():
             bindings[binding_idx] = self.binding_ptrs[name]
@@ -90,11 +94,11 @@ class TRTInference:
     def initialize_bindings(self):
         self.bindings = {}
         self.binding_ptrs = {}
-        for i in range(self.engine.num_bindings):
-            name = self.engine.get_binding_name(i)
-            if not self.engine.binding_is_input(i):
-                shape = self.engine.get_binding_shape(name)
-                dtype = trt.nptype(self.engine.get_binding_dtype(name))
+        for i in range(self.engine.num_io_tensors):
+            name = self.engine.get_tensor_name(i)
+            if not self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
+                shape = self.engine.get_tensor_shape(name)
+                dtype = trt.nptype(self.engine.get_tensor_dtype(name))
                 self.bindings[name] = torch.from_numpy(np.empty(shape, dtype=dtype)).cuda()
                 self.binding_ptrs[name] = self.bindings[name].data_ptr()
     
