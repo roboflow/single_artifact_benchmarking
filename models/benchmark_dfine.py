@@ -9,6 +9,7 @@ import os
 from onnx_inference import ONNXInference
 from trt_inference import TRTInference, build_engine
 from evaluation import evaluate
+from clock_watch import ThrottleMonitor
 
 
 def get_coco_class_index_mapping(annotations_path: str):
@@ -145,18 +146,29 @@ if __name__ == "__main__":
     engine_path = "dfine_n_coco_fp16.engine"
     coco_dir = "/home/isaac/cocodir/val2017"
     coco_annotations_file_path = "/home/isaac/cocodir/annotations/instances_val2017.json"
+    buffer_time = 0.0
 
     class_mapping = get_coco_class_index_mapping(coco_annotations_file_path)
     inv_class_mapping = {v: k for k, v in class_mapping.items()}
 
-    # onnx_inference = DFINEONNXInference(model_path)
+    # inference = DFINEONNXInference(model_path)
     if not os.path.exists(engine_path):
-        build_engine(model_path, engine_path, use_fp16=True)
-    trt_inference = DFINETRTInference(engine_path)
+        with ThrottleMonitor() as throttle_monitor:
+            build_engine(model_path, engine_path, use_fp16=True)
+            if throttle_monitor.did_throttle():
+                print("GPU throttled during engine build. This is expected and is a limitation of TensorRT.")
+
+    inference = DFINETRTInference(engine_path)
 
     # evaluate(onnx_inference, coco_dir, coco_annotations_file_path, inv_class_mapping)
 
     # onnx_inference.print_latency_stats()
 
-    evaluate(trt_inference, coco_dir, coco_annotations_file_path, inv_class_mapping)
-    trt_inference.print_latency_stats()
+    with ThrottleMonitor() as throttle_monitor:
+        evaluate(inference, coco_dir, coco_annotations_file_path, inv_class_mapping, buffer_time=buffer_time)
+        if throttle_monitor.did_throttle():
+            print(f"🔴  GPU throttled, latency results are unreliable. Try increasing the buffer time. Current buffer time: {buffer_time}s")
+        else:
+            print("GPU did not throttle during evaluation. Latency numbers should be reliable.")
+
+    inference.print_latency_stats()

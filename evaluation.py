@@ -7,16 +7,17 @@ from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 import json
 from tqdm import tqdm
+import time
 
 
-def evaluate(inference, image_dir: str, annotations_file_path: str, class_mapping: dict[int, str]|None=None, output_file_name: str="predictions.json"):
+def evaluate(inference, image_dir: str, annotations_file_path: str, class_mapping: dict[int, str]|None=None, buffer_time: float=0.0, output_file_name: str="predictions.json"):
     predictions = []
 
     coco_annotations = COCO(annotations_file_path)
 
     image_ids = coco_annotations.getImgIds()
 
-    # image_ids = image_ids[:10]
+    # image_ids = image_ids[:50]
 
     for image_id in tqdm(image_ids):
         image_info = coco_annotations.loadImgs(image_id)[0]
@@ -48,6 +49,8 @@ def evaluate(inference, image_dir: str, annotations_file_path: str, class_mappin
                 "category_id": class_mapping[int(this_class_id)] if class_mapping is not None else int(this_class_id),
                 "score": float(this_score)
             })
+        
+        time.sleep(buffer_time)
 
     with open(output_file_name, "w") as f:
         json.dump(predictions, f)

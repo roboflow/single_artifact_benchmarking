@@ -9,6 +9,7 @@ import os
 from onnx_inference import ONNXInference
 from trt_inference import TRTInference, build_engine
 from evaluation import evaluate
+from clock_watch import ThrottleMonitor
 
 
 def cxcywh_to_xyxy(boxes):
@@ -65,16 +66,28 @@ class RFDETRTRTInference(TRTInference):
 
 
 if __name__ == "__main__":
-    model_path = "rf-detr-nano.onnx"
-    engine_path = "rf-detr-nano.engine"
+    # model_path = "rf-detr-nano.onnx"
+    model_path = "/home/isaac/LW-DETR/output/lwdetr_dinov2_small_flex_coco/inference_model.onnx"
+    # engine_path = "rf-detr-nano.engine"
+    # engine_path = "rf-detr-nano_fp16.engine"
+    # engine_path = "inference_model_clamped_tgt.engine"
+    engine_path = "inference_model_clamped_tgt_fp16.engine"
     coco_dir = "/home/isaac/cocodir/val2017"
     coco_annotations_file_path = "/home/isaac/cocodir/annotations/instances_val2017.json"
+    buffer_time = 0.0
 
-    # onnx_inference = RFDETRONNXInference(model_path)
+    # inference = RFDETRONNXInference(model_path)
     if not os.path.exists(engine_path):
-        build_engine(model_path, engine_path)
-    trt_inference = RFDETRTRTInference(engine_path)
+        with ThrottleMonitor() as throttle_monitor:
+            build_engine(model_path, engine_path, use_fp16=True)
+            if throttle_monitor.did_throttle():
+                print("GPU throttled during engine build. This is expected and is a limitation of TensorRT.")
 
-    evaluate(trt_inference, coco_dir, coco_annotations_file_path)
+    inference = RFDETRTRTInference(engine_path)
 
-    trt_inference.print_latency_stats()
+    with ThrottleMonitor() as throttle_monitor:
+        evaluate(inference, coco_dir, coco_annotations_file_path, buffer_time=buffer_time)
+        if throttle_monitor.did_throttle():
+            print(f"🔴  GPU throttled, latency results are unreliable. Try increasing the buffer time. Current buffer time: {buffer_time}s")
+
+    inference.print_latency_stats()
