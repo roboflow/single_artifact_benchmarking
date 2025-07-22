@@ -11,6 +11,7 @@ class ONNXInference:
         
         self.input_names = [input.name for input in self.session.get_inputs()]
         self.output_names = [output.name for output in self.session.get_outputs()]
+        self.input_shapes = [input.shape for input in self.session.get_inputs()]
         self.output_shapes = [output.shape for output in self.session.get_outputs()]
 
         if len(self.input_names) != 1 and image_input_name is None:
