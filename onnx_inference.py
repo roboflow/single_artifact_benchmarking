@@ -23,7 +23,7 @@ class ONNXInference:
 
         self.profiler = CUDAProfiler()
     
-    def preprocess(self, input_image: torch.Tensor) -> torch.Tensor:
+    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
         raise NotImplementedError("Subclasses must implement this method")
     
     def construct_bindings(self, input_image: torch.Tensor) -> tuple[ort.IOBinding, dict[str, torch.Tensor]]:
@@ -69,13 +69,13 @@ class ONNXInference:
 
         return binding, outputs
     
-    def postprocess(self, outputs: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # Postprocess the outputs into bbox, class, and score
         # bbox must be in normalized coordinates (0-1) and in xyxy format
         raise NotImplementedError("Subclasses must implement this method")
     
     def infer(self, input_image: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        input_image = self.preprocess(input_image)
+        input_image, metadata = self.preprocess(input_image)
 
         binding, outputs = self.construct_bindings(input_image)
 
@@ -86,7 +86,7 @@ class ONNXInference:
 
         binding.synchronize_outputs()
 
-        return self.postprocess(outputs)
+        return self.postprocess(outputs, metadata)
     
     def print_latency_stats(self):
         self.profiler.print_stats()

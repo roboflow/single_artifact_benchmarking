@@ -72,7 +72,7 @@ class TRTInference:
 
         self.profiler = CUDAProfiler()
     
-    def preprocess(self, input_image: torch.Tensor) -> torch.Tensor:
+    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
         raise NotImplementedError("Subclasses must implement this method")
 
     def construct_bindings(self, input_image: torch.Tensor) -> list[int]:
@@ -102,13 +102,13 @@ class TRTInference:
                 self.bindings[name] = torch.from_numpy(np.empty(shape, dtype=dtype)).cuda()
                 self.binding_ptrs[name] = self.bindings[name].data_ptr()
     
-    def postprocess(self, output_tensors: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def postprocess(self, output_tensors: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # Postprocess the output tensors into bbox, class, and score
         # bbox must be in normalized coordinates (0-1) and in xyxy format
         raise NotImplementedError("Subclasses must implement this method")
 
     def infer(self, input_image: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        input_image = self.preprocess(input_image)
+        input_image, metadata = self.preprocess(input_image)
 
         bindings = self.construct_bindings(input_image)
 
@@ -118,7 +118,7 @@ class TRTInference:
                 
         outputs = {name: self.bindings[name].clone() for name in self.output_names}
 
-        return self.postprocess(outputs)
+        return self.postprocess(outputs, metadata)
 
     def print_latency_stats(self):
         self.profiler.print_stats()

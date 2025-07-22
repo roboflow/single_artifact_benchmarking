@@ -20,7 +20,7 @@ def cxcywh_to_xyxy(boxes):
     return boxes
 
 
-def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) -> torch.Tensor:
+def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) -> tuple[torch.Tensor, dict]:
     if len(image.shape) == 3:
         image = image.unsqueeze(0)
     
@@ -29,10 +29,10 @@ def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) ->
 
     image = TF.normalize(image, means, stds)
     image = TF.resize(image, image_input_shape[2:])
-    return image
+    return image, {}
 
 
-def postprocess_output(outputs: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     bboxes = outputs["dets"]
     out_logits = outputs["labels"]
     scores = out_logits.sigmoid()
@@ -49,19 +49,19 @@ def postprocess_output(outputs: dict[str, torch.Tensor]) -> tuple[torch.Tensor, 
 
 
 class RFDETRONNXInference(ONNXInference):
-    def preprocess(self, input_image: torch.Tensor) -> torch.Tensor:
+    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
         return preprocess_image(input_image, self.image_input_shape)
     
-    def postprocess(self, outputs: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return postprocess_output(outputs)
+    def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return postprocess_output(outputs, metadata)
 
 
 class RFDETRTRTInference(TRTInference):
-    def preprocess(self, input_image: torch.Tensor) -> torch.Tensor:
+    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
         return preprocess_image(input_image, self.image_input_shape)
     
-    def postprocess(self, outputs: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return postprocess_output(outputs)
+    def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return postprocess_output(outputs, metadata)
 
 
 if __name__ == "__main__":
