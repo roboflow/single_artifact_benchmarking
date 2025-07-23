@@ -1,6 +1,6 @@
 RESEARCH USE ONLY LICENSE
 
-Copyright (c) 2025 Isaac Robinson, Roboflow
+Copyright (c) 2025 Roboflow
 
 Permission is hereby granted to use this software solely for academic research and educational purposes, subject to the following conditions:
 
