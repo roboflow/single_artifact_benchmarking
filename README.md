@@ -40,16 +40,3 @@ To run the benchmark:
 ## Contributions
 
 Contributions of new models to the benchmark suite are welcome. Please submit model additions by opening a pull request to the repository.
-
-## License
-
-**Research Use Only**
-
-This software is provided exclusively for research and educational purposes. Commercial use, redistribution, or incorporation into commercial products is prohibited without explicit written authorization.
-
-Users must:
-- Limit usage to academic research or educational activities
-- Provide appropriate citation in publications utilizing this framework
-- Refrain from redistribution or commercial licensing without permission
-
-For commercial licensing inquiries, contact the project maintainers.
