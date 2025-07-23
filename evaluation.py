@@ -3,6 +3,8 @@ import torchvision.transforms.functional as TF
 from PIL import Image
 import os
 import numpy as np
+import faster_coco_eval
+faster_coco_eval.init_as_pycocotools()
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 import json
@@ -10,7 +12,7 @@ from tqdm import tqdm
 import time
 
 
-def evaluate(inference, image_dir: str, annotations_file_path: str, class_mapping: dict[int, str]|None=None, buffer_time: float=0.0, output_file_name: str="predictions.json"):
+def evaluate(inference, image_dir: str, annotations_file_path: str, class_mapping: dict[int, str]|None=None, buffer_time: float=0.0, output_file_name: str|None=None):
     predictions = []
 
     coco_annotations = COCO(annotations_file_path)
@@ -52,10 +54,15 @@ def evaluate(inference, image_dir: str, annotations_file_path: str, class_mappin
         
         time.sleep(buffer_time)
 
-    with open(output_file_name, "w") as f:
-        json.dump(predictions, f)
+    if output_file_name is not None:
+        print(f"Saving predictions to {output_file_name}")
+        with open(output_file_name, "w") as f:
+            json.dump(predictions, f)
 
-    coco_det = coco_annotations.loadRes(output_file_name)
+    print("Loading predictions into COCO format (in-memory)")
+    coco_det = coco_annotations.loadRes(predictions)
+    
+    print("Evaluating predictions")
     coco_eval = COCOeval(coco_annotations, coco_det, "bbox")
     coco_eval.params.imgIds = image_ids
     coco_eval.evaluate()

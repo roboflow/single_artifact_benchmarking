@@ -1,12 +1,13 @@
 import torch
 import torchvision.transforms.functional as TF
 import os
+import json
+import fire
+
 
 from onnx_inference import ONNXInference
-from trt_inference import TRTInference, build_engine
-from evaluation import evaluate
-from clock_watch import ThrottleMonitor
-from models.utils import get_coco_class_index_mapping
+from trt_inference import TRTInference
+from models.utils import ArtifactBenchmarkRequest, run_benchmark_on_artifacts, pretty_print_results
 
 
 def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) -> tuple[torch.Tensor, dict]:
@@ -95,31 +96,37 @@ class YOLOv11TRTInference(TRTInference):
         return postprocess_output(outputs, metadata)
     
 
+def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, output_file_name: str = "yolov11_results.json"):
+    requests = [
+        ArtifactBenchmarkRequest(
+            onnx_path="yolo11n_nms_conf_0.001.onnx",
+            inference_class=YOLOv11ONNXInference,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="yolo11n_nms_conf_0.001.onnx",
+            inference_class=YOLOv11TRTInference,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="yolo11n_nms_conf_0.001.onnx",
+            inference_class=YOLOv11TRTInference,
+            needs_fp16=True,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        ),
+    ]
+
+    results = run_benchmark_on_artifacts(requests, image_dir, annotations_file_path)
+
+    print(f"Saving results to {output_file_name}")
+    with open(output_file_name, "w") as f:
+        json.dump(results, f)
+    
+    pretty_print_results(results)
+
+
 if __name__ == "__main__":
-    model_path = "yolo11n_nms_conf_.001.onnx"
-    # engine_path = "yolo11n.engine"
-    engine_path = "yolo11n_nms_conf_.001.fp16.engine"
-    coco_dir = "/home/isaac/cocodir/val2017"
-    coco_annotations_file_path = "/home/isaac/cocodir/annotations/instances_val2017.json"
-    buffer_time = 0.0
-
-    class_mapping = get_coco_class_index_mapping(coco_annotations_file_path)
-    inv_class_mapping = {v: k for k, v in class_mapping.items()}
-
-    # onnx_inference = YOLOv11ONNXInference(model_path)
-    if not os.path.exists(engine_path):
-        with ThrottleMonitor() as throttle_monitor:
-            build_engine(model_path, engine_path, use_fp16=True)
-            if throttle_monitor.did_throttle():
-                print("GPU throttled during engine build. This is expected and is a limitation of TensorRT.")
-
-    inference = YOLOv11TRTInference(engine_path)
-
-    with ThrottleMonitor() as throttle_monitor:
-        evaluate(inference, coco_dir, coco_annotations_file_path, inv_class_mapping)
-        if throttle_monitor.did_throttle():
-            print(f"🔴  GPU throttled, latency results are unreliable. Try increasing the buffer time. Current buffer time: {buffer_time}s")
-        else:
-            print("GPU did not throttle during evaluation. Latency numbers should be reliable.")
-
-    inference.print_latency_stats()
+    fire.Fire(main)

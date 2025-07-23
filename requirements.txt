@@ -1,7 +1,9 @@
 tensorrt==10.4
-torch==2.6.0
-torchvision==0.21.0
+torch==2.7.1
+torchvision==0.22.0
 onnxruntime-gpu==1.22.0
 supervision==0.22.0
 pycocotools==2.0.8
 numpy==1.25.2
+fire==0.7.0
+faster-coco-eval==1.6.7

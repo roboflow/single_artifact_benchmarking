@@ -2,13 +2,13 @@ import torch
 import torchvision.transforms.functional as TF
 import numpy as np
 import onnxruntime as ort
-import os
+import json
+import fire
+
 
 from onnx_inference import ONNXInference
-from trt_inference import TRTInference, build_engine
-from evaluation import evaluate
-from clock_watch import ThrottleMonitor
-from models.utils import get_coco_class_index_mapping
+from trt_inference import TRTInference
+from models.utils import ArtifactBenchmarkRequest, run_benchmark_on_artifacts, pretty_print_results
 
 
 def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) -> tuple[torch.Tensor, dict]:
@@ -101,55 +101,65 @@ class DFINETRTInference(TRTInference):
     def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
         return preprocess_image(input_image, self.image_input_shape)
     
-    def construct_bindings(self, input_image: torch.Tensor) -> list[int]:
-        # Construct bindings for the input and output tensors
+    def copy_input_data(self, input_image: torch.Tensor):
+        """Copy input data to persistent tensors, handling multiple inputs"""
         input_image = input_image.contiguous()
-
-        bindings = [None] * self.engine.num_io_tensors
-
-        for name, binding_idx in self.output_binding_idxs.items():
-            bindings[binding_idx] = self.binding_ptrs[name]
+        input_shape = tuple(input_image.shape)
         
-        bindings[self.input_binding_idxs[self.image_input_name]] = input_image.data_ptr()
-
-        target_shapes_buffer = torch.ones((1, 2), dtype=torch.int64, device=input_image.device)
-        bindings[self.input_binding_idxs["orig_target_sizes"]] = target_shapes_buffer.data_ptr()
-
-        return bindings
+        # Handle main image input (same as base class)
+        current_shape = tuple(self.persistent_tensors[self.image_input_name].shape)
+        if input_shape != current_shape:
+            if self.use_cuda_graph:
+                self.current_input_shape = input_shape
+            else:
+                self._reallocate_tensor_for_shape(self.image_input_name, input_shape)
+        
+        # Copy main image data
+        self.persistent_tensors[self.image_input_name].copy_(input_image)
+        
+        # Handle the additional "orig_target_sizes" input
+        if "orig_target_sizes" in self.persistent_tensors:
+            # Fill with ones as in the original construct_bindings method
+            # The persistent tensor should already have shape (1, 2) and dtype int64
+            self.persistent_tensors["orig_target_sizes"].fill_(1)
+        
+        return input_shape
     
     def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         return postprocess_output(outputs, metadata)
 
 
+def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, output_file_name: str = "dfine_results.json"):
+    requests = [
+        ArtifactBenchmarkRequest(
+            onnx_path="dfine_n_coco.onnx",
+            inference_class=DFINEONNXInference,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="dfine_n_coco.onnx",
+            inference_class=DFINETRTInference,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="dfine_n_coco.onnx",
+            inference_class=DFINETRTInference,
+            needs_fp16=True,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        ),
+    ]
+
+    results = run_benchmark_on_artifacts(requests, image_dir, annotations_file_path)
+
+    print(f"Saving results to {output_file_name}")
+    with open(output_file_name, "w") as f:
+        json.dump(results, f)
+    
+    pretty_print_results(results)
+
+
 if __name__ == "__main__":
-    model_path = "dfine_n_coco.onnx"
-    # engine_path = "dfine_n_coco.engine"
-    engine_path = "dfine_n_coco_fp16.engine"
-    coco_dir = "/home/isaac/cocodir/val2017"
-    coco_annotations_file_path = "/home/isaac/cocodir/annotations/instances_val2017.json"
-    buffer_time = 0.0
-
-    class_mapping = get_coco_class_index_mapping(coco_annotations_file_path)
-    inv_class_mapping = {v: k for k, v in class_mapping.items()}
-
-    # inference = DFINEONNXInference(model_path)
-    if not os.path.exists(engine_path):
-        with ThrottleMonitor() as throttle_monitor:
-            build_engine(model_path, engine_path, use_fp16=True)
-            if throttle_monitor.did_throttle():
-                print("GPU throttled during engine build. This is expected and is a limitation of TensorRT.")
-
-    inference = DFINETRTInference(engine_path)
-
-    # evaluate(onnx_inference, coco_dir, coco_annotations_file_path, inv_class_mapping)
-
-    # onnx_inference.print_latency_stats()
-
-    with ThrottleMonitor() as throttle_monitor:
-        evaluate(inference, coco_dir, coco_annotations_file_path, inv_class_mapping, buffer_time=buffer_time)
-        if throttle_monitor.did_throttle():
-            print(f"🔴  GPU throttled, latency results are unreliable. Try increasing the buffer time. Current buffer time: {buffer_time}s")
-        else:
-            print("GPU did not throttle during evaluation. Latency numbers should be reliable.")
-
-    inference.print_latency_stats()
+    fire.Fire(main)
