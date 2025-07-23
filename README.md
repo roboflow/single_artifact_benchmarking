@@ -37,6 +37,10 @@ To run the benchmark:
 1. Install dependencies: `pip install -r requirements.txt`
 2. Execute: `python3 benchmark_all.py <path to coco val dir> <path to coco val annotations>`
 
+## Contributions
+
+Contributions of new models to the benchmark suite are welcome. Please submit model additions by opening a pull request to the repository.
+
 ## License
 
 **Research Use Only**
