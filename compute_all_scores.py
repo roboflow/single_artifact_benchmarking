@@ -6,6 +6,7 @@ from tqdm import tqdm
 from models.benchmark_yolov11 import YOLOv11TRTInference, YOLOv11ONNXInference
 from models.benchmark_rfdetr import RFDETRTRTInference, RFDETRONNXInference
 from models.benchmark_dfine import DFINETRTInference, DFINEONNXInference
+from models.benchmark_lwdetr import LWDETRONNXInference, LWDETRTRTInference
 from models.utils import get_coco_class_index_mapping
 
 from clock_watch import ThrottleMonitor
@@ -112,6 +113,19 @@ artifact_requests = [
         onnx_path="dfine_n_coco.onnx",
         inference_class=DFINETRTInference,
         needs_class_remapping=True,
+        needs_fp16=True,
+    ),
+    ArtifactBenchmarkRequest(
+        onnx_path="lw-detr-tiny.onnx",
+        inference_class=LWDETRONNXInference,
+    ),
+    ArtifactBenchmarkRequest(
+        onnx_path="lw-detr-tiny.onnx",
+        inference_class=LWDETRTRTInference,
+    ),
+    ArtifactBenchmarkRequest(
+        onnx_path="lw-detr-tiny.onnx",
+        inference_class=LWDETRTRTInference,
         needs_fp16=True,
     ),
 ]
