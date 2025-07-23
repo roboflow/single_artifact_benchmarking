@@ -139,14 +139,14 @@ def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, o
             needs_class_remapping=True,
         ),
         ArtifactBenchmarkRequest(
-            onnx_path="dfine_s_coco.onnx",
+            onnx_path="dfine_s_obj2coco.onnx",
             inference_class=DFINETRTInference,
             needs_fp16=True,
             buffer_time=buffer_time,
             needs_class_remapping=True,
         ),
         ArtifactBenchmarkRequest(
-            onnx_path="dfine_m_coco.onnx",
+            onnx_path="dfine_m_obj2coco.onnx",
             inference_class=DFINETRTInference,
             needs_fp16=True,
             buffer_time=buffer_time,
