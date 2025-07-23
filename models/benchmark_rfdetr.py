@@ -62,16 +62,18 @@ def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, o
     requests = [
         ArtifactBenchmarkRequest(
             onnx_path="rf-detr-nano.onnx",
-            inference_class=RFDETRONNXInference,
-            buffer_time=buffer_time,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="rf-detr-nano.onnx",
             inference_class=RFDETRTRTInference,
+            needs_fp16=True,
             buffer_time=buffer_time,
         ),
         ArtifactBenchmarkRequest(
-            onnx_path="rf-detr-nano.onnx",
+            onnx_path="rf-detr-small.onnx",
+            inference_class=RFDETRTRTInference,
+            needs_fp16=True,
+            buffer_time=buffer_time,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="rf-detr-medium.onnx",
             inference_class=RFDETRTRTInference,
             needs_fp16=True,
             buffer_time=buffer_time,

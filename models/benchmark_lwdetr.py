@@ -1,16 +1,11 @@
 import torch
 import torchvision.transforms.functional as TF
-from PIL import Image
-import numpy as np
-import io
-import requests
-import os
+import json
+import fire
 
 from onnx_inference import ONNXInference
-from trt_inference import TRTInference, build_engine
-from evaluation import evaluate
-from clock_watch import ThrottleMonitor
-from models.utils import cxcywh_to_xyxy
+from trt_inference import TRTInference
+from models.utils import cxcywh_to_xyxy, ArtifactBenchmarkRequest, run_benchmark_on_artifacts, pretty_print_results
 
 
 def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) -> tuple[torch.Tensor, dict]:
@@ -57,26 +52,36 @@ class LWDETRTRTInference(TRTInference):
         return postprocess_output(outputs, metadata)
 
 
+def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, output_file_name: str = "lwdetr_results.json"):
+    requests = [
+        ArtifactBenchmarkRequest(
+            onnx_path="lw-detr-tiny.onnx",
+            inference_class=LWDETRTRTInference,
+            needs_fp16=True,
+            buffer_time=buffer_time,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="lw-detr-small.onnx",
+            inference_class=LWDETRTRTInference,
+            needs_fp16=True,
+            buffer_time=buffer_time,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="lw-detr-medium.onnx",
+            inference_class=LWDETRTRTInference,
+            needs_fp16=True,
+            buffer_time=buffer_time,
+        ),
+    ]
+
+    results = run_benchmark_on_artifacts(requests, image_dir, annotations_file_path)
+
+    print(f"Saving results to {output_file_name}")
+    with open(output_file_name, "w") as f:
+        json.dump(results, f)
+    
+    pretty_print_results(results)
+
+
 if __name__ == "__main__":
-    model_path = "lw-detr-tiny.onnx"
-    # engine_path = "lw-detr-tiny.engine"
-    engine_path = "lw-detr-tiny_fp16.engine"
-    coco_dir = "/home/isaac/cocodir/val2017"
-    coco_annotations_file_path = "/home/isaac/cocodir/annotations/instances_val2017.json"
-    buffer_time = 0.0
-
-    # inference = LWDETRONNXInference(model_path)
-    if not os.path.exists(engine_path):
-        with ThrottleMonitor() as throttle_monitor:
-            build_engine(model_path, engine_path, use_fp16=True)
-            if throttle_monitor.did_throttle():
-                print("GPU throttled during engine build. This is expected and is a limitation of TensorRT.")
-
-    inference = LWDETRTRTInference(engine_path)
-
-    with ThrottleMonitor() as throttle_monitor:
-        evaluate(inference, coco_dir, coco_annotations_file_path, buffer_time=buffer_time)
-        if throttle_monitor.did_throttle():
-            print(f"🔴  GPU throttled, latency results are unreliable. Try increasing the buffer time. Current buffer time: {buffer_time}s")
-
-    inference.print_latency_stats()
+    fire.Fire(main)
