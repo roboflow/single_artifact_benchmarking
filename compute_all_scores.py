@@ -184,17 +184,17 @@ if __name__ == "__main__":
     with open("results.json", "w") as f:
         json.dump(results, f)
     
-        print("\n=== Benchmark Results ===")
-        print(f"{'Model':30} {'Runtime':8} {'FP16':5} {'mAP50':>6} {'mAP50-95':>9} {'Latency':>7} {'Throttled':>9}")
-        print("-" * 80)
-        for result in results:
-            model = result['artifact_request']['onnx_path']
-            runtime = "TRT" if issubclass(result['artifact_request']['inference_class'], TRTInference) else "ONNX"
-            fp16 = result['artifact_request']['needs_fp16']
-            map50 = result['accuracy_stats'][1] * 100
-            map50_95 = result['accuracy_stats'][0] * 100
-            latency = result['latency_stats']['median']
-            throttled = result['throttled']
-            
-            print(f"{model:30} {runtime:8} {'yes' if fp16 else 'no':5} "
-                  f"{map50:6.1f} {map50_95:9.1f} {latency:7.2f} {'yes' if throttled else 'no':>9}")
+    print("\n=== Benchmark Results ===")
+    print(f"{'Model':30} {'Runtime':8} {'FP16':5} {'mAP50':>6} {'mAP50-95':>9} {'Latency':>7} {'Throttled':>9}")
+    print("-" * 80)
+    for request, result in zip(artifact_requests, results):
+        model = request.onnx_path
+        runtime = "TRT" if issubclass(request.inference_class, TRTInference) else "ONNX"
+        fp16 = request.needs_fp16
+        map50 = result['accuracy_stats'][1] * 100
+        map50_95 = result['accuracy_stats'][0] * 100
+        latency = result['latency_stats']['median']
+        throttled = result['throttled']
+        
+        print(f"{model:30} {runtime:8} {'yes' if fp16 else 'no':5} "
+                f"{map50:6.1f} {map50_95:9.1f} {latency:7.2f} {'yes' if throttled else 'no':>9}")
