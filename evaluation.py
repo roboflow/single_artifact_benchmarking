@@ -62,4 +62,4 @@ def evaluate(inference, image_dir: str, annotations_file_path: str, class_mappin
     coco_eval.accumulate()
     coco_eval.summarize()
 
-    return coco_eval.stats[0]
+    return coco_eval.stats.tolist()

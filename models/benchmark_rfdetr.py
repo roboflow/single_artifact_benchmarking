@@ -10,15 +10,7 @@ from onnx_inference import ONNXInference
 from trt_inference import TRTInference, build_engine
 from evaluation import evaluate
 from clock_watch import ThrottleMonitor
-
-
-def cxcywh_to_xyxy(boxes):
-    boxes = boxes.clone()
-    boxes[..., 0] = boxes[..., 0] - boxes[..., 2] / 2
-    boxes[..., 1] = boxes[..., 1] - boxes[..., 3] / 2
-    boxes[..., 2] = boxes[..., 0] + boxes[..., 2]
-    boxes[..., 3] = boxes[..., 1] + boxes[..., 3]
-    return boxes
+from models.utils import cxcywh_to_xyxy
 
 
 def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) -> tuple[torch.Tensor, dict]:
