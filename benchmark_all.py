@@ -39,10 +39,9 @@ def main(image_dir, annotation_file, buffer_time=0.0, models_dir="models", outpu
                     results = [line for line in content.split('\n') if line.strip()]
                 
                 # Add to combined list
-                if isinstance(results, list):
-                    all_results.extend(results)
-                else:
-                    all_results.append(results)
+                all_results.extend(results)
+            else:
+                raise ValueError(f"Output file {output_file} does not exist")
                     
         except subprocess.CalledProcessError:
             print(f"Failed to run {script}")
