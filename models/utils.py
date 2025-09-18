@@ -130,16 +130,78 @@ def run_benchmark_on_artifacts(artifact_requests: list[ArtifactBenchmarkRequest]
 
 
 def pretty_print_results(results: list[dict]):
-    print(f"{'Model':30} {'Runtime':8} {'FP16':5} {'mAP50':>6} {'mAP50-95':>9} {'Latency':>7} {'Throttled':>9}")
-    print("-" * 80)
+    """
+    Prints summary runtime info plus COCO AP/AR breakdown.
+
+    Assumes result['accuracy_stats'] is pycocotools COCOeval.stats with this order:
+      0: AP@[.50:.95] (area=all,   maxDets=100)
+      1: AP@.50       (area=all,   maxDets=100)
+      2: AP@.75       (area=all,   maxDets=100)
+      3: AP@[.50:.95] (area=small, maxDets=100)
+      4: AP@[.50:.95] (area=medium,maxDets=100)
+      5: AP@[.50:.95] (area=large, maxDets=100)
+      6: AR@[.50:.95] (area=all,   maxDets=1)
+      7: AR@[.50:.95] (area=all,   maxDets=10)
+      8: AR@[.50:.95] (area=all,   maxDets=100)
+      9: AR@[.50:.95] (area=small, maxDets=100)
+     10: AR@[.50:.95] (area=medium,maxDets=100)
+     11: AR@[.50:.95] (area=large, maxDets=100)
+    """
+
+    def _pct(stats, idx):
+        try:
+            v = stats[idx]
+            return None if v is None else v * 100.0
+        except Exception:
+            return None
+
+    def _fmt(x, width=6, prec=1):
+        return f"{x:{width}.{prec}f}" if isinstance(x, (int, float)) else f"{'—':>{width}}"
+
+    # ---------- Summary table (keep your original columns; add AP75) ----------
+    header = f"{'Model':30} {'Runtime':8} {'FP16':5} {'mAP50':>6} {'mAP50-95':>9} {'AP75':>6} {'Latency':>9} {'Throttled':>9}"
+    print(header)
+    print("-" * len(header))
+
+    for result in results:
+        model     = result['artifact_request']['onnx_path']
+        runtime   = "TRT" if result['artifact_request']['is_trt'] else "ONNX"
+        fp16      = result['artifact_request']['needs_fp16']
+        stats     = result['accuracy_stats']
+        map50     = _pct(stats, 1)
+        map50_95  = _pct(stats, 0)
+        ap75      = _pct(stats, 2)
+        latency   = result.get('latency_stats', {}).get('median', None)
+        throttled = result.get('throttled', False)
+
+        print(f"{model:30} {runtime:8} {'yes' if fp16 else 'no':5} "
+              f"{_fmt(map50)} {_fmt(map50_95,9)} {_fmt(ap75)} {_fmt(latency,9,2)} {'yes' if throttled else 'no':>9}")
+
+    # ---------- AP breakdown (size buckets) ----------
+    print("\nAP breakdown (COCO):")
+    ap_hdr = f"{'Model':30} {'AP_s':>6} {'AP_m':>6} {'AP_l':>6}"
+    print(ap_hdr)
+    print("-" * len(ap_hdr))
     for result in results:
         model = result['artifact_request']['onnx_path']
-        runtime = "TRT" if result['artifact_request']['is_trt'] else "ONNX"
-        fp16 = result['artifact_request']['needs_fp16']
-        map50 = result['accuracy_stats'][1] * 100
-        map50_95 = result['accuracy_stats'][0] * 100
-        latency = result['latency_stats']['median']
-        throttled = result['throttled']
-        
-        print(f"{model:30} {runtime:8} {'yes' if fp16 else 'no':5} "
-                f"{map50:6.1f} {map50_95:9.1f} {latency:7.2f} {'yes' if throttled else 'no':>9}")
+        stats = result['accuracy_stats']
+        ap_s  = _pct(stats, 3)
+        ap_m  = _pct(stats, 4)
+        ap_l  = _pct(stats, 5)
+        print(f"{model:30} {_fmt(ap_s)} {_fmt(ap_m)} {_fmt(ap_l)}")
+
+    # ---------- AR breakdown (maxDets + size buckets) ----------
+    print("\nAR breakdown (COCO):")
+    ar_hdr = f"{'Model':30} {'AR@1':>6} {'AR@10':>6} {'AR@100':>7} {'AR_s':>6} {'AR_m':>6} {'AR_l':>6}"
+    print(ar_hdr)
+    print("-" * len(ar_hdr))
+    for result in results:
+        model  = result['artifact_request']['onnx_path']
+        stats  = result['accuracy_stats']
+        ar1    = _pct(stats, 6)
+        ar10   = _pct(stats, 7)
+        ar100  = _pct(stats, 8)
+        ar_s   = _pct(stats, 9)
+        ar_m   = _pct(stats, 10)
+        ar_l   = _pct(stats, 11)
+        print(f"{model:30} {_fmt(ar1)} {_fmt(ar10)} {_fmt(ar100,7)} {_fmt(ar_s)} {_fmt(ar_m)} {_fmt(ar_l)}")
