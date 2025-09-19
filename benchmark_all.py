@@ -26,7 +26,8 @@ def main(image_dir, annotation_file, buffer_time=0.0, models_dir="models", outpu
         
         # Run the script
         try:
-            subprocess.run(["python", script, image_dir, annotation_file, str(buffer_time), output_file], check=True)
+            module_name = script.replace(f"/", ".").replace(".py", "")
+            subprocess.run(["python", "-m", module_name, image_dir, annotation_file, str(buffer_time), output_file], check=True)
             
             # Load results
             if os.path.exists(output_file):
