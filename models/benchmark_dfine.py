@@ -96,7 +96,7 @@ class DFINEONNXInference(ONNXInference):
 
 class DFINETRTInference(TRTInference):
     def __init__(self, model_path: str, image_input_name: str|None="images"):
-        super().__init__(model_path, image_input_name)
+        super().__init__(model_path, image_input_name, use_cuda_graph=False)
 
     def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
         return preprocess_image(input_image, self.image_input_shape)
@@ -132,21 +132,70 @@ class DFINETRTInference(TRTInference):
 def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, output_file_name: str = "dfine_results.json"):
     requests = [
         ArtifactBenchmarkRequest(
-            onnx_path="dfine_n_coco.onnx",
+            onnx_path="dfine_n_coco.opset17.onnx",
+            inference_class=DFINETRTInference,
+            needs_fp16=False,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="dfine_n_coco.opset17.onnx",
             inference_class=DFINETRTInference,
             needs_fp16=True,
             buffer_time=buffer_time,
             needs_class_remapping=True,
         ),
         ArtifactBenchmarkRequest(
-            onnx_path="dfine_s_obj2coco.onnx",
+            onnx_path="dfine_s_obj2coco.opset17.onnx",
+            inference_class=DFINETRTInference,
+            needs_fp16=False,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="dfine_s_obj2coco.opset17.onnx",
             inference_class=DFINETRTInference,
             needs_fp16=True,
             buffer_time=buffer_time,
             needs_class_remapping=True,
         ),
         ArtifactBenchmarkRequest(
-            onnx_path="dfine_m_obj2coco.onnx",
+            onnx_path="dfine_m_obj2coco.opset17.onnx",
+            inference_class=DFINETRTInference,
+            needs_fp16=False,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="dfine_m_obj2coco.opset17.onnx",
+            inference_class=DFINETRTInference,
+            needs_fp16=True,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="dfine_l_obj2coco_e25.opset17.onnx",
+            inference_class=DFINETRTInference,
+            needs_fp16=False,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="dfine_l_obj2coco_e25.opset17.onnx",
+            inference_class=DFINETRTInference,
+            needs_fp16=True,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="dfine_x_obj2coco.opset17.onnx",
+            inference_class=DFINETRTInference,
+            needs_fp16=False,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="dfine_x_obj2coco.opset17.onnx",
             inference_class=DFINETRTInference,
             needs_fp16=True,
             buffer_time=buffer_time,
