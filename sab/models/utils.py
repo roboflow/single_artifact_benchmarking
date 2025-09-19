@@ -5,10 +5,10 @@ from tqdm import tqdm
 from supervision.utils.file import read_json_file
 from supervision.dataset.formats.coco import coco_categories_to_classes, build_coco_class_index_mapping
 
-from clock_watch import ThrottleMonitor
-from onnx_inference import ONNXInference
-from trt_inference import TRTInference, build_engine
-from evaluation import evaluate
+from sab.clock_watch import ThrottleMonitor
+from sab.onnx_inference import ONNXInference
+from sab.trt_inference import TRTInference, build_engine
+from sab.evaluation import evaluate
 
 
 def download_file(url, filename):

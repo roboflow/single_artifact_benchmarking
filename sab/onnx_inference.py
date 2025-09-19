@@ -2,7 +2,7 @@ import onnxruntime as ort
 import torch
 import numpy as np
 
-from profiler import CUDAProfiler
+from sab.profiler import CUDAProfiler
 
 
 class ONNXInference:

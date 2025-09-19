@@ -5,9 +5,9 @@ import json
 import fire
 
 
-from onnx_inference import ONNXInference
-from trt_inference import TRTInference
-from models.utils import ArtifactBenchmarkRequest, run_benchmark_on_artifacts, pretty_print_results
+from sab.onnx_inference import ONNXInference
+from sab.trt_inference import TRTInference
+from sab.models.utils import ArtifactBenchmarkRequest, run_benchmark_on_artifacts, pretty_print_results
 
 
 def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) -> tuple[torch.Tensor, dict]:
