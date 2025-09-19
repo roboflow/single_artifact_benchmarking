@@ -25,7 +25,10 @@ def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict) -> tupl
     out_logits = outputs["labels"]
     scores = out_logits.sigmoid()
 
-    topk_values, topk_indexes = torch.topk(scores.view(scores.shape[0], -1), 300, dim=1)
+    flat_scores = scores.view(scores.shape[0], -1)
+    num_select = min(300, flat_scores.shape[1])
+
+    topk_values, topk_indexes = torch.topk(flat_scores, num_select, dim=1)
     scores = topk_values
     topk_boxes = topk_indexes // out_logits.shape[2]
     labels = topk_indexes % out_logits.shape[2]

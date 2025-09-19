@@ -31,7 +31,10 @@ def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict) -> tupl
     out_logits = outputs["labels"]
     scores = out_logits.sigmoid()
 
-    topk_values, topk_indexes = torch.topk(scores.view(scores.shape[0], -1), 300, dim=1)
+    flat_scores = scores.view(scores.shape[0], -1)
+    num_select = min(300, flat_scores.shape[1])
+
+    topk_values, topk_indexes = torch.topk(flat_scores, num_select, dim=1)
     scores = topk_values
     topk_boxes = topk_indexes // out_logits.shape[2]
     labels = topk_indexes % out_logits.shape[2]
@@ -51,6 +54,9 @@ class RFDETRONNXInference(ONNXInference):
 
 
 class RFDETRTRTInference(TRTInference):
+    def __init__(self, model_path: str, image_input_name: str|None=None):
+        super().__init__(model_path, image_input_name, use_cuda_graph=True)
+
     def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
         return preprocess_image(input_image, self.image_input_shape)
     
@@ -63,13 +69,31 @@ def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, o
         ArtifactBenchmarkRequest(
             onnx_path="rf-detr-nano.onnx",
             inference_class=RFDETRTRTInference,
+            needs_fp16=False,
+            buffer_time=buffer_time,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="rf-detr-nano.onnx",
+            inference_class=RFDETRTRTInference,
             needs_fp16=True,
             buffer_time=buffer_time,
         ),
         ArtifactBenchmarkRequest(
             onnx_path="rf-detr-small.onnx",
             inference_class=RFDETRTRTInference,
+            needs_fp16=False,
+            buffer_time=buffer_time,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="rf-detr-small.onnx",
+            inference_class=RFDETRTRTInference,
             needs_fp16=True,
+            buffer_time=buffer_time,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="rf-detr-medium.onnx",
+            inference_class=RFDETRTRTInference,
+            needs_fp16=False,
             buffer_time=buffer_time,
         ),
         ArtifactBenchmarkRequest(
