@@ -51,12 +51,14 @@ class ArtifactBenchmarkRequest:
             needs_class_remapping: bool = False,
             needs_fp16: bool = False,
             buffer_time: float = 0.0,
+            max_images: int|None = None,
         ):
         self.onnx_path = onnx_path
         self.inference_class = inference_class
         self.needs_class_remapping = needs_class_remapping
         self.needs_fp16 = needs_fp16
         self.buffer_time = buffer_time
+        self.max_images = max_images
 
     def dump(self):
         return {
@@ -65,8 +67,8 @@ class ArtifactBenchmarkRequest:
             "is_trt": issubclass(self.inference_class, TRTInference),
             "needs_fp16": self.needs_fp16,
             "buffer_time": self.buffer_time,
+            "max_images": self.max_images,
         }
-
 
 def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images_dir: str, annotations_file_path: str) -> tuple[dict, dict, bool]:
     if not os.path.exists(artifact_request.onnx_path):
@@ -103,7 +105,7 @@ def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images
     
     throttled = False
     with ThrottleMonitor() as throttle_monitor:
-        accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, buffer_time=artifact_request.buffer_time)
+        accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, buffer_time=artifact_request.buffer_time, max_images=artifact_request.max_images)
         if throttle_monitor.did_throttle():
             throttled = True
             print(f"🔴  GPU throttled, latency results are unreliable. Try increasing the buffer time. Current buffer time: {artifact_request.buffer_time}s")
@@ -125,6 +127,7 @@ def run_benchmark_on_artifacts(artifact_requests: list[ArtifactBenchmarkRequest]
             "latency_stats": latency_stats,
             "throttled": throttled,
         }
+        print(result)
         results.append(result)
     return results
 
