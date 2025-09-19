@@ -64,7 +64,7 @@ def build_engine(model_path, engine_path, use_fp16=False):
 
 
 class TRTInference:
-    def __init__(self, engine_path: str, image_input_name: str|None=None, use_cuda_graph: bool=True):
+    def __init__(self, engine_path: str, image_input_name: str|None=None, use_cuda_graph: bool=True, prediction_type: str="bbox"):
         logger = trt.Logger()
         trt.init_libnvinfer_plugins(logger, "")
 
@@ -111,6 +111,8 @@ class TRTInference:
         print(f"TensorRT inference initialized with CUDA graphs: {self.use_cuda_graph}")
         if self.use_cuda_graph:
             print("Note: CUDA graphs will be tested on first inference. If incompatible, will fall back to standard execution.")
+        
+        self.prediction_type = prediction_type
     
     def initialize_persistent_tensors(self):
         """Initialize persistent PyTorch tensors and bind them to TensorRT"""

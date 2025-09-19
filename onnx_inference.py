@@ -6,7 +6,7 @@ from profiler import CUDAProfiler
 
 
 class ONNXInference:
-    def __init__(self, model_path: str, image_input_name: str|None=None):
+    def __init__(self, model_path: str, image_input_name: str|None=None, prediction_type: str="bbox"):
         self.session = ort.InferenceSession(model_path, providers=['CUDAExecutionProvider'])
         
         self.input_names = [input.name for input in self.session.get_inputs()]
@@ -23,6 +23,8 @@ class ONNXInference:
         self.image_input_shape = self.session.get_inputs()[self.input_names.index(self.image_input_name)].shape
 
         self.profiler = CUDAProfiler()
+
+        self.prediction_type = prediction_type
     
     def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
         raise NotImplementedError("Subclasses must implement this method")
