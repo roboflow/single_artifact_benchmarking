@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='single-artifact-benchmarking',
-    version='0.1.0',
+    version='0.2.0',
     url='https://github.com/roboflow/single-artifact-benchmarking.git',
     author='Isaac Robinson',
     author_email='isaac@roboflow.com',

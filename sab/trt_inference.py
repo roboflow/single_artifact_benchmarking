@@ -2,7 +2,7 @@ import tensorrt as trt
 import torch
 import numpy as np
 
-from profiler import CUDAProfiler
+from sab.profiler import CUDAProfiler
 
 
 def build_engine(model_path, engine_path, use_fp16=False):
