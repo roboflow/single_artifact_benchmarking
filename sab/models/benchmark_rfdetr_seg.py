@@ -77,7 +77,7 @@ class RFDETRSegTRTInference(TRTInference):
     def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         return postprocess_output(outputs, metadata)
 
-class NoCudaGraphRFDETRSegTRTInference(RFDETRSegTRTInference):
+class NoCudaGraphRFDETRSegTRTInference(TRTInference):
     def __init__(self, model_path: str, image_input_name: str|None=None):
         super().__init__(model_path, image_input_name, use_cuda_graph=False, prediction_type="segm")
 
