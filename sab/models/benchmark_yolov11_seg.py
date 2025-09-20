@@ -1,13 +1,15 @@
 import torch
 import torchvision.transforms.functional as TF
+import torch.nn.functional as F
 import os
 import json
 import fire
 
 
-from onnx_inference import ONNXInference
-from trt_inference import TRTInference
-from models.utils import ArtifactBenchmarkRequest, run_benchmark_on_artifacts, pretty_print_results
+from sab.onnx_inference import ONNXInference
+from sab.trt_inference import TRTInference
+from sab.models.utils import ArtifactBenchmarkRequest, run_benchmark_on_artifacts, pretty_print_results
+from sab.models.graph_surgery import fuse_yolo_mask_postprocessing_into_onnx
 
 
 def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) -> tuple[torch.Tensor, dict]:
@@ -53,9 +55,9 @@ def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) ->
 
 
 def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    bboxes = outputs["output0"][0, :, :4]
-    scores = outputs["output0"][0, :, 4]
-    labels = outputs["output0"][0, :, 5]
+    bboxes = outputs["_det_meta"][0, :, :4]
+    scores = outputs["_det_meta"][0, :, 4]
+    labels = outputs["_det_meta"][0, :, 5]
 
     image_input_shape = metadata["image_input_shape"]
 
@@ -76,10 +78,39 @@ def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict) -> tupl
     # Clip to [0, 1] 
     bboxes = torch.clamp(bboxes, 0, 1)
 
-    return bboxes, labels, scores
+    # Get masks, upsample to padded input size, remove padding, then resize to original image size
+    masks = outputs["_masks_cropped"]
+
+    # Select batch dimension if present
+    if masks.dim() == 4:
+        masks = masks[0]  # shape: (num_masks, h, w)
+
+    # Ensure shape is (N=1, C=num_masks, H, W) for interpolation
+    if masks.dim() == 3:
+        masks = masks.unsqueeze(0)
+
+    # Upsample to model input size (with padding)
+    input_h, input_w = image_input_shape[2], image_input_shape[3]
+    masks = F.interpolate(masks.float(), size=(input_h, input_w), mode="bilinear", align_corners=False)
+
+    # Remove letterbox padding
+    left, top, right_pad, bottom_pad = metadata["padding"]
+    masks = masks[:, :, top: input_h - bottom_pad, left: input_w - right_pad]
+
+    # Resize to original image spatial size
+    orig_h, orig_w = metadata["original_shape"][2], metadata["original_shape"][3]
+    masks = F.interpolate(masks, size=(orig_h, orig_w), mode="bilinear", align_corners=False)
+
+    # Binarize
+    masks = (masks.squeeze(0) > 0.5)
+
+    return bboxes, labels, scores, masks
 
 
-class YOLOv11ONNXInference(ONNXInference):
+class YOLOv11SegONNXInference(ONNXInference):
+    def __init__(self, model_path: str, image_input_name: str|None=None):
+        super().__init__(model_path, image_input_name, prediction_type="segm")
+
     # reference: https://github.com/ultralytics/ultralytics/blob/3c88bebc9514a4d7f70b771811ddfe3a625ef14d/examples/YOLOv8-OpenCV-ONNX-Python/main.py#L23C57-L31
     def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
         return preprocess_image(input_image, self.image_input_shape)
@@ -88,9 +119,9 @@ class YOLOv11ONNXInference(ONNXInference):
         return postprocess_output(outputs, metadata)
     
 
-class YOLOv11TRTInference(TRTInference):
+class YOLOv11SegTRTInference(TRTInference):
     def __init__(self, model_path: str, image_input_name: str|None=None):
-        super().__init__(model_path, image_input_name, use_cuda_graph=False)
+        super().__init__(model_path, image_input_name, use_cuda_graph=False, prediction_type="segm")
 
     def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
         return preprocess_image(input_image, self.image_input_shape)
@@ -102,71 +133,25 @@ class YOLOv11TRTInference(TRTInference):
 def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, output_file_name: str = "yolov11_results.json"):
     requests = [
         ArtifactBenchmarkRequest(
-            onnx_path="yolo11n_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=False,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11n_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
+            onnx_path="yolo11n_seg_nms_conf_0.01.onnx",
+            graph_surgery_func=fuse_yolo_mask_postprocessing_into_onnx,
+            inference_class=YOLOv11SegTRTInference,
             needs_fp16=True,
             buffer_time=buffer_time,
             needs_class_remapping=True,
         ),
         ArtifactBenchmarkRequest(
-            onnx_path="yolo11s_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=False,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11s_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
+            onnx_path="yolo11s_seg_nms_conf_0.01.onnx",
+            graph_surgery_func=fuse_yolo_mask_postprocessing_into_onnx,
+            inference_class=YOLOv11SegTRTInference,
             needs_fp16=True,
             buffer_time=buffer_time,
             needs_class_remapping=True,
         ),
         ArtifactBenchmarkRequest(
-            onnx_path="yolo11m_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=False,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11m_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=True,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11l_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=False,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11l_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=True,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11x_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=False,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11x_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
+            onnx_path="yolo11m_seg_nms_conf_0.01.onnx",
+            graph_surgery_func=fuse_yolo_mask_postprocessing_into_onnx,
+            inference_class=YOLOv11SegTRTInference,
             needs_fp16=True,
             buffer_time=buffer_time,
             needs_class_remapping=True,

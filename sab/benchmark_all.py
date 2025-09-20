@@ -6,7 +6,7 @@ import json
 import fire
 from pathlib import Path
 
-from models.utils import pretty_print_results
+from sab.models.utils import pretty_print_results
 
 
 def main(image_dir, annotation_file, buffer_time=0.0, models_dir="models", output_dir="benchmark_results"):
@@ -26,8 +26,7 @@ def main(image_dir, annotation_file, buffer_time=0.0, models_dir="models", outpu
         
         # Run the script
         try:
-            module_name = script.replace(f"/", ".").replace(".py", "")
-            subprocess.run(["python", "-m", module_name, image_dir, annotation_file, str(buffer_time), output_file], check=True)
+            subprocess.run(["python", script, image_dir, annotation_file, str(buffer_time), output_file], check=True)
             
             # Load results
             if os.path.exists(output_file):
