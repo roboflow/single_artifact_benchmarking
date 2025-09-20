@@ -77,6 +77,16 @@ class RFDETRSegTRTInference(TRTInference):
     def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         return postprocess_output(outputs, metadata)
 
+class NoCudaGraphRFDETRSegTRTInference(RFDETRSegTRTInference):
+    def __init__(self, model_path: str, image_input_name: str|None=None):
+        super().__init__(model_path, image_input_name, use_cuda_graph=False, prediction_type="segm")
+
+    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
+        return preprocess_image(input_image, self.image_input_shape)
+    
+    def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        return postprocess_output(outputs, metadata)
+
 
 def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, output_file_name: str = "rfdetr_seg_results.json"):
     requests = [
