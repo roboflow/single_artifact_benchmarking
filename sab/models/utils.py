@@ -96,10 +96,7 @@ def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images
     
         if not os.path.exists(engine_path):
             print(f"Building engine for {artifact_request.onnx_path} and saving to {engine_path}...")
-            with ThrottleMonitor() as throttle_monitor:
-                build_engine(artifact_request.onnx_path, engine_path, use_fp16=artifact_request.needs_fp16)
-                if throttle_monitor.did_throttle():
-                    print("GPU throttled during engine build. This is expected and is a limitation of TensorRT.")
+            build_engine(artifact_request.onnx_path, engine_path, use_fp16=artifact_request.needs_fp16)
         else:
             print(f"Engine for {artifact_request.onnx_path} already exists at {engine_path}")
 
@@ -110,14 +107,8 @@ def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images
         
         inference = artifact_request.inference_class(artifact_request.onnx_path)
     
-    throttled = False
-    with ThrottleMonitor() as throttle_monitor:
-        accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, buffer_time=artifact_request.buffer_time, max_images=artifact_request.max_images)
-        if throttle_monitor.did_throttle():
-            throttled = True
-            print(f"🔴  GPU throttled, latency results are unreliable. Try increasing the buffer time. Current buffer time: {artifact_request.buffer_time}s")
-        else:
-            print("GPU did not throttle during evaluation. Latency numbers should be reliable.")
+    throttled = None
+    accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, buffer_time=artifact_request.buffer_time, max_images=artifact_request.max_images)
     
     latency_stats = inference.profiler.get_stats()
     
