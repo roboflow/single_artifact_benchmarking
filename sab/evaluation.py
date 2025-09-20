@@ -11,6 +11,7 @@ import pycocotools.mask as mask_utils
 import json
 from tqdm import tqdm
 import time
+import random
 
 
 def evaluate(inference, image_dir: str, annotations_file_path: str, class_mapping: dict[int, str]|None=None, buffer_time: float=0.0, output_file_name: str|None=None, max_images: int|None=None):
@@ -19,6 +20,8 @@ def evaluate(inference, image_dir: str, annotations_file_path: str, class_mappin
     coco_annotations = COCO(annotations_file_path)
 
     image_ids = coco_annotations.getImgIds()
+    random.seed(0)
+    random.shuffle(image_ids)
 
     if max_images is not None:
         image_ids = image_ids[:max_images]
