@@ -1,6 +1,7 @@
 import os
 import requests
 from tqdm import tqdm
+from typing import Callable
 
 from supervision.utils.file import read_json_file
 from supervision.dataset.formats.coco import coco_categories_to_classes, build_coco_class_index_mapping
@@ -52,6 +53,7 @@ class ArtifactBenchmarkRequest:
             needs_fp16: bool = False,
             buffer_time: float = 0.0,
             max_images: int|None = None,
+            graph_surgery_func: Callable[str, str]|None = None,
         ):
         self.onnx_path = onnx_path
         self.inference_class = inference_class
@@ -59,6 +61,7 @@ class ArtifactBenchmarkRequest:
         self.needs_fp16 = needs_fp16
         self.buffer_time = buffer_time
         self.max_images = max_images
+        self.graph_surgery_func = graph_surgery_func
 
     def dump(self):
         return {
@@ -68,12 +71,16 @@ class ArtifactBenchmarkRequest:
             "needs_fp16": self.needs_fp16,
             "buffer_time": self.buffer_time,
             "max_images": self.max_images,
+            "graph_surgery_func": self.graph_surgery_func.__name__ if self.graph_surgery_func else None,
         }
 
 def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images_dir: str, annotations_file_path: str) -> tuple[dict, dict, bool]:
     if not os.path.exists(artifact_request.onnx_path):
         print(f"Downloading {artifact_request.onnx_path}...")
         download_file(f"https://storage.googleapis.com/single_artifact_benchmarking/{artifact_request.onnx_path}", artifact_request.onnx_path)
+
+    if artifact_request.graph_surgery_func:
+        artifact_request.onnx_path = artifact_request.graph_surgery_func(artifact_request.onnx_path)
 
     if artifact_request.needs_class_remapping:
         class_mapping = get_coco_class_index_mapping(annotations_file_path)

@@ -109,7 +109,7 @@ def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict) -> tupl
 
 class YOLOv11SegONNXInference(ONNXInference):
     def __init__(self, model_path: str, image_input_name: str|None=None):
-        super().__init__(fused_model_path, image_input_name, prediction_type="segm")
+        super().__init__(model_path, image_input_name, prediction_type="segm")
 
     # reference: https://github.com/ultralytics/ultralytics/blob/3c88bebc9514a4d7f70b771811ddfe3a625ef14d/examples/YOLOv8-OpenCV-ONNX-Python/main.py#L23C57-L31
     def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
@@ -121,7 +121,7 @@ class YOLOv11SegONNXInference(ONNXInference):
 
 class YOLOv11SegTRTInference(TRTInference):
     def __init__(self, model_path: str, image_input_name: str|None=None):
-        super().__init__(fused_model_path, image_input_name, use_cuda_graph=False, prediction_type="segm")
+        super().__init__(model_path, image_input_name, use_cuda_graph=False, prediction_type="segm")
 
     def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
         return preprocess_image(input_image, self.image_input_shape)
@@ -133,21 +133,24 @@ class YOLOv11SegTRTInference(TRTInference):
 def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, output_file_name: str = "yolov11_results.json"):
     requests = [
         ArtifactBenchmarkRequest(
-            onnx_path=fuse_yolo_mask_postprocessing_into_onnx("yolo11n_seg_nms_conf_0.01.onnx"),
+            onnx_path="yolo11n_seg_nms_conf_0.01.onnx",
+            graph_surgery_func=fuse_yolo_mask_postprocessing_into_onnx,
             inference_class=YOLOv11SegTRTInference,
             needs_fp16=True,
             buffer_time=buffer_time,
             needs_class_remapping=True,
         ),
         ArtifactBenchmarkRequest(
-            onnx_path=fuse_yolo_mask_postprocessing_into_onnx("yolo11s_seg_nms_conf_0.01.onnx"),
+            onnx_path="yolo11s_seg_nms_conf_0.01.onnx",
+            graph_surgery_func=fuse_yolo_mask_postprocessing_into_onnx,
             inference_class=YOLOv11SegTRTInference,
             needs_fp16=True,
             buffer_time=buffer_time,
             needs_class_remapping=True,
         ),
         ArtifactBenchmarkRequest(
-            onnx_path=fuse_yolo_mask_postprocessing_into_onnx("yolo11m_seg_nms_conf_0.01.onnx"),
+            onnx_path="yolo11m_seg_nms_conf_0.01.onnx",
+            graph_surgery_func=fuse_yolo_mask_postprocessing_into_onnx,
             inference_class=YOLOv11SegTRTInference,
             needs_fp16=True,
             buffer_time=buffer_time,
