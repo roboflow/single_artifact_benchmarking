@@ -20,6 +20,7 @@ def evaluate(inference, image_dir: str, annotations_file_path: str, class_mappin
     coco_annotations = COCO(annotations_file_path)
 
     image_ids = coco_annotations.getImgIds()
+    image_ids = sorted(image_ids)
     random.seed(0)
     random.shuffle(image_ids)
 
