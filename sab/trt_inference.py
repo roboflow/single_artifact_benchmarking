@@ -288,6 +288,8 @@ class TRTInference:
     def infer(self, input_image: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         input_image, metadata = self.preprocess(input_image)
 
+        torch.cuda.synchronize()
+
         with torch.cuda.stream(self.torch_stream):
             # Copy input data to persistent tensor
             input_shape = self.copy_input_data(input_image)
@@ -315,7 +317,9 @@ class TRTInference:
                 # Use regular profiling for standard execution
                 with self.profiler.profile(stream=self.torch_stream):
                     self._execute_standard()
-                        
+        
+        torch.cuda.synchronize()
+
         # Get outputs
         outputs = self.get_outputs()
 
