@@ -88,6 +88,7 @@ def evaluate(inference, image_dir: str, annotations_file_path: str, class_mappin
     
     print("Evaluating predictions")
     coco_eval = COCOeval(coco_annotations, coco_det, inference.prediction_type)
+    coco_eval.params.maxDets = [500]
     coco_eval.params.imgIds = image_ids
     coco_eval.evaluate()
     coco_eval.accumulate()

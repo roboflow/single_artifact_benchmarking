@@ -175,6 +175,7 @@ class ThrottleMonitor:
 def get_max_clocks() -> tuple[int, int]:
     """Get the maximum GPU and memory clocks."""
     res = run(["sudo", "nvidia-smi", "--query-gpu=clocks.max.graphics,clocks.max.memory", "--format=csv,noheader"], capture_output=True)
+    output = res.stdout.decode("utf-8").splitlines()[0].strip()
     output = res.stdout.decode("utf-8").strip()
     # Parse comma-separated values and remove "MHz" suffix
     gpu_clock_str, mem_clock_str = output.split(',')
