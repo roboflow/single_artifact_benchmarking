@@ -13,7 +13,7 @@ from tqdm import tqdm
 import time
 
 
-def evaluate(inference, image_dir: str, annotations_file_path: str, class_mapping: dict[int, str]|None=None, buffer_time: float=0.0, output_file_name: str|None=None, max_images: int|None=None):
+def evaluate(inference, image_dir: str, annotations_file_path: str, class_mapping: dict[int, str]|None=None, buffer_time: float=0.0, output_file_name: str|None=None, max_images: int|None=None, max_dets: int=100):
     predictions = []
 
     coco_annotations = COCO(annotations_file_path)
@@ -88,6 +88,7 @@ def evaluate(inference, image_dir: str, annotations_file_path: str, class_mappin
     
     print("Evaluating predictions")
     coco_eval = COCOeval(coco_annotations, coco_det, inference.prediction_type)
+    coco_eval.params.maxDets = [1, 10, max_dets,]
     coco_eval.params.imgIds = image_ids
     coco_eval.evaluate()
     coco_eval.accumulate()

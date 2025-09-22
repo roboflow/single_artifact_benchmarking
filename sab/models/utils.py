@@ -54,6 +54,7 @@ class ArtifactBenchmarkRequest:
             buffer_time: float = 0.0,
             max_images: int|None = None,
             graph_surgery_func: Callable[str, str]|None = None,
+            max_dets: int = 100,
         ):
         self.onnx_path = onnx_path
         self.inference_class = inference_class
@@ -62,7 +63,8 @@ class ArtifactBenchmarkRequest:
         self.buffer_time = buffer_time
         self.max_images = max_images
         self.graph_surgery_func = graph_surgery_func
-
+        self.max_dets = max_dets
+        
     def dump(self):
         return {
             "onnx_path": self.onnx_path,
@@ -72,6 +74,7 @@ class ArtifactBenchmarkRequest:
             "buffer_time": self.buffer_time,
             "max_images": self.max_images,
             "graph_surgery_func": self.graph_surgery_func.__name__ if self.graph_surgery_func else None,
+            "max_dets": self.max_dets,
         }
 
 def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images_dir: str, annotations_file_path: str) -> tuple[dict, dict, bool]:
@@ -112,7 +115,7 @@ def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images
     
     throttled = False
     with ThrottleMonitor() as throttle_monitor:
-        accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, buffer_time=artifact_request.buffer_time, max_images=artifact_request.max_images)
+        accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, buffer_time=artifact_request.buffer_time, max_images=artifact_request.max_images, max_dets=artifact_request.max_dets)
         if throttle_monitor.did_throttle():
             throttled = True
             print(f"🔴  GPU throttled, latency results are unreliable. Try increasing the buffer time. Current buffer time: {artifact_request.buffer_time}s")
@@ -144,18 +147,18 @@ def pretty_print_results(results: list[dict]):
     Prints summary runtime info plus COCO AP/AR breakdown.
 
     Assumes result['accuracy_stats'] is pycocotools COCOeval.stats with this order:
-      0: AP@[.50:.95] (area=all,   maxDets=100)
-      1: AP@.50       (area=all,   maxDets=100)
-      2: AP@.75       (area=all,   maxDets=100)
-      3: AP@[.50:.95] (area=small, maxDets=100)
-      4: AP@[.50:.95] (area=medium,maxDets=100)
-      5: AP@[.50:.95] (area=large, maxDets=100)
+      0: AP@[.50:.95] (area=all,   maxDets=max_dets)
+      1: AP@.50       (area=all,   maxDets=max_dets)
+      2: AP@.75       (area=all,   maxDets=max_dets)
+      3: AP@[.50:.95] (area=small, maxDets=max_dets)
+      4: AP@[.50:.95] (area=medium,maxDets=max_dets)
+      5: AP@[.50:.95] (area=large, maxDets=max_dets)
       6: AR@[.50:.95] (area=all,   maxDets=1)
       7: AR@[.50:.95] (area=all,   maxDets=10)
-      8: AR@[.50:.95] (area=all,   maxDets=100)
-      9: AR@[.50:.95] (area=small, maxDets=100)
-     10: AR@[.50:.95] (area=medium,maxDets=100)
-     11: AR@[.50:.95] (area=large, maxDets=100)
+      8: AR@[.50:.95] (area=all,   maxDets=max_dets)
+      9: AR@[.50:.95] (area=small, maxDets=max_dets)
+     10: AR@[.50:.95] (area=medium,maxDets=max_dets)
+     11: AR@[.50:.95] (area=large, maxDets=max_dets)
     """
 
     def _pct(stats, idx):
@@ -202,7 +205,7 @@ def pretty_print_results(results: list[dict]):
 
     # ---------- AR breakdown (maxDets + size buckets) ----------
     print("\nAR breakdown (COCO):")
-    ar_hdr = f"{'Model':30} {'AR@1':>6} {'AR@10':>6} {'AR@100':>7} {'AR_s':>6} {'AR_m':>6} {'AR_l':>6}"
+    ar_hdr = f"{'Model':30} {'AR@1':>6} {'AR@10':>6} {'AR@max_dets':>13} {'AR_s':>6} {'AR_m':>6} {'AR_l':>6}"
     print(ar_hdr)
     print("-" * len(ar_hdr))
     for result in results:
@@ -210,8 +213,8 @@ def pretty_print_results(results: list[dict]):
         stats  = result['accuracy_stats']
         ar1    = _pct(stats, 6)
         ar10   = _pct(stats, 7)
-        ar100  = _pct(stats, 8)
+        armax_dets  = _pct(stats, 8)
         ar_s   = _pct(stats, 9)
         ar_m   = _pct(stats, 10)
         ar_l   = _pct(stats, 11)
-        print(f"{model:30} {_fmt(ar1)} {_fmt(ar10)} {_fmt(ar100,7)} {_fmt(ar_s)} {_fmt(ar_m)} {_fmt(ar_l)}")
+        print(f"{model:30} {_fmt(ar1)} {_fmt(ar10)} {_fmt(armax_dets,13)} {_fmt(ar_s)} {_fmt(ar_m)} {_fmt(ar_l)}")
