@@ -68,13 +68,13 @@ def chk(ret, func):
 def emit_clock_changes():
     chk(nvml.nvmlInit_v2(), "nvmlInit")
 
-    cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
-    if cuda_visible_devices:
-        cuda_visible_devices = cuda_visible_devices.split(",")
-        device_index = int(cuda_visible_devices[0])
-    else:
-        device_index = 0
-    
+    # cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
+    # if cuda_visible_devices:
+    #     cuda_visible_devices = cuda_visible_devices.split(",")
+    #     device_index = int(cuda_visible_devices[0])
+    # else:
+    #     device_index = 0
+    device_index = 0
     print(f"Monitoring clock changes for device {device_index}")
 
     dev = ct.c_void_p()
