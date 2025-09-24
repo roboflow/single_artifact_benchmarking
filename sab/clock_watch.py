@@ -172,7 +172,7 @@ class ThrottleMonitor:
         # gpu_clock, mem_clock = get_max_clocks()
         # enable_persistence(True)
         # lock_clocks(gpu_clock, mem_clock)
-        self.monitor_throttling(gpu_clock)
+        self.monitor_throttling(1590)
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
