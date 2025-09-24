@@ -68,9 +68,18 @@ def chk(ret, func):
 def emit_clock_changes():
     chk(nvml.nvmlInit_v2(), "nvmlInit")
 
+    cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if cuda_visible_devices:
+        cuda_visible_devices = cuda_visible_devices.split(",")
+        device_index = int(cuda_visible_devices[0])
+    else:
+        device_index = 0
+    
+    print(f"Monitoring clock changes for device {device_index}")
+
     dev = ct.c_void_p()
-    chk(nvml.nvmlDeviceGetHandleByIndex_v2(0, ct.byref(dev)),
-        "getHandle(0)")
+    chk(nvml.nvmlDeviceGetHandleByIndex_v2(device_index, ct.byref(dev)),
+        f"getHandle({device_index})")
 
     evset = ct.c_void_p()
     chk(nvml.nvmlEventSetCreate(ct.byref(evset)), "eventSetCreate")
@@ -160,16 +169,16 @@ class ThrottleMonitor:
     #         enable_persistence(False)
     #         unlock_clocks()
     def __enter__(self):
-        gpu_clock, mem_clock = get_max_clocks()
-        enable_persistence(True)
-        lock_clocks(gpu_clock, mem_clock)
+        # gpu_clock, mem_clock = get_max_clocks()
+        # enable_persistence(True)
+        # lock_clocks(gpu_clock, mem_clock)
         self.monitor_throttling(gpu_clock)
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
-        enable_persistence(False)
-        unlock_clocks()
+        # enable_persistence(False)
+        # unlock_clocks()
 
 
 def get_max_clocks() -> tuple[int, int]:
