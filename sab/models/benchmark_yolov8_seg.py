@@ -156,6 +156,22 @@ def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, o
             buffer_time=buffer_time,
             needs_class_remapping=True,
         ),
+        ArtifactBenchmarkRequest(
+            onnx_path="yolov8l_seg_nms_conf_0.01.onnx",
+            graph_surgery_func=fuse_yolo_mask_postprocessing_into_onnx,
+            inference_class=YOLOv8SegTRTInference,
+            needs_fp16=True,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="yolov8x_seg_nms_conf_0.01.onnx",
+            graph_surgery_func=fuse_yolo_mask_postprocessing_into_onnx,
+            inference_class=YOLOv8SegTRTInference,
+            needs_fp16=True,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        ),
     ]
 
     results = run_benchmark_on_artifacts(requests, image_dir, annotations_file_path)
