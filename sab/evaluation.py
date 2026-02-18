@@ -34,8 +34,13 @@ def evaluate(inference, image_dir: str, annotations_file_path: str, class_mappin
         if inference.prediction_type == "bbox":
             xyxy, class_id, score = inference.infer(image)
             masks = None
+            keypoints = None
         elif inference.prediction_type == "segm":
             xyxy, class_id, score, masks = inference.infer(image)
+            keypoints = None
+        elif inference.prediction_type == "keypoints":
+            xyxy, class_id, score, keypoints = inference.infer(image)
+            masks = None
         else:
             raise ValueError(f"Invalid prediction type: {inference.prediction_type}")
 
@@ -56,6 +61,15 @@ def evaluate(inference, image_dir: str, annotations_file_path: str, class_mappin
             masks = masks.squeeze(0)
             masks = masks.cpu().numpy()
 
+        if keypoints is not None:
+            keypoints = keypoints.squeeze(0)  # [N, 51]
+            # Scale normalized x,y to absolute image coordinates
+            kps_abs = keypoints.clone().reshape(-1, 17, 3)
+            kps_abs[:, :, 0] *= initial_shape[0]  # width
+            kps_abs[:, :, 1] *= initial_shape[1]  # height
+            kps_abs = kps_abs.reshape(-1, 51)
+            kps_abs = kps_abs.cpu().numpy()
+
         # for this_xywh, this_class_id, this_score in zip(xywh, class_id, score):
         for i in range(xywh.shape[0]):
             this_xywh = xywh[i]
@@ -68,12 +82,15 @@ def evaluate(inference, image_dir: str, annotations_file_path: str, class_mappin
                 "category_id": class_mapping[int(this_class_id)] if class_mapping is not None else int(this_class_id),
                 "score": float(this_score)
             }
-            
+
             if masks is not None:
                 formatted_array = np.asfortranarray(masks[i, :, :, np.newaxis].astype(np.uint8))
                 prediction["segmentation"] = mask_utils.encode(formatted_array)[0]
                 prediction["segmentation"]["counts"] = prediction["segmentation"]["counts"].decode("utf-8")
-            
+
+            if keypoints is not None:
+                prediction["keypoints"] = kps_abs[i].tolist()
+
             predictions.append(prediction)
         
         time.sleep(buffer_time)
