@@ -1,3 +1,4 @@
+import os
 import onnxruntime as ort
 import torch
 import numpy as np
@@ -6,8 +7,8 @@ from sab.profiler import CUDAProfiler, CPUProfiler
 
 
 class ONNXInferenceBase:
-    def __init__(self, model_path: str, providers: list[str], profiler, device: str, image_input_name: str|None=None, prediction_type: str="bbox"):
-        self.session = ort.InferenceSession(model_path, providers=providers)
+    def __init__(self, model_path: str, providers: list[str], profiler, device: str, image_input_name: str|None=None, prediction_type: str="bbox", session_options: ort.SessionOptions|None=None):
+        self.session = ort.InferenceSession(model_path, providers=providers, sess_options=session_options)
 
         self.input_names = [input.name for input in self.session.get_inputs()]
         self.output_names = [output.name for output in self.session.get_outputs()]
@@ -26,6 +27,8 @@ class ONNXInferenceBase:
         self.device = device
 
         self.prediction_type = prediction_type
+
+        self.warmup()
 
     def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
         raise NotImplementedError("Subclasses must implement this method")
@@ -92,6 +95,18 @@ class ONNXInferenceBase:
 
         return self.postprocess(outputs, metadata)
 
+    def warmup(self, num_iterations: int = 10):
+        """Run dummy data through the model to trigger JIT optimizations
+        and warm CPU/GPU caches before real measurements begin."""
+        device = torch.device(self.device)
+        dummy_input = torch.randn(self.image_input_shape, dtype=torch.float32, device=device)
+        for _ in range(num_iterations):
+            binding, _ = self.construct_bindings(dummy_input)
+            binding.synchronize_inputs()
+            self.session.run_with_iobinding(binding)
+            binding.synchronize_outputs()
+        self.profiler.reset()
+
     def print_latency_stats(self):
         self.profiler.print_stats()
 
@@ -104,5 +119,12 @@ class ONNXInferenceCUDA(ONNXInferenceBase):
 
 class ONNXInferenceCPU(ONNXInferenceBase):
     def __init__(self, model_path: str, image_input_name: str|None=None, prediction_type: str="bbox"):
+        # Fix thread counts for stable latency across runs:
+        # - Fixed intra_op threads avoids ORT picking different counts per run
+        # - Single inter_op thread eliminates scheduling variance between ops
+        sess_options = ort.SessionOptions()
+        sess_options.intra_op_num_threads = os.cpu_count()
+        sess_options.inter_op_num_threads = 1
         super().__init__(model_path, ['CPUExecutionProvider'], CPUProfiler(),
-                         'cpu', image_input_name, prediction_type)
+                         'cpu', image_input_name, prediction_type,
+                         session_options=sess_options)

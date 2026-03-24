@@ -6,7 +6,7 @@ from typing import Callable
 from supervision.utils.file import read_json_file
 from supervision.dataset.formats.coco import coco_categories_to_classes, build_coco_class_index_mapping
 
-from sab.clock_watch import ThrottleMonitor
+from sab.clock_watch import ThrottleMonitor, CPUFrequencyMonitor
 from sab.onnx_inference import ONNXInferenceCUDA, ONNXInferenceCPU
 from sab.trt_inference import TRTInference, build_engine
 from sab.evaluation import evaluate
@@ -118,7 +118,14 @@ def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images
 
     throttled = False
     if is_cpu:
-        accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, buffer_time=artifact_request.buffer_time, max_images=artifact_request.max_images, max_dets=artifact_request.max_dets)
+        with CPUFrequencyMonitor() as cpu_monitor:
+            accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, buffer_time=artifact_request.buffer_time, max_images=artifact_request.max_images, max_dets=artifact_request.max_dets)
+            if cpu_monitor.did_drift():
+                throttled = True
+                summary = cpu_monitor.get_summary()
+                print(f"🔴  CPU frequency drifted during evaluation (max drift: {summary['max_drift_mhz']:.0f} MHz). Latency results may be unreliable.")
+            else:
+                print("CPU frequency stable during evaluation. Latency numbers should be reliable.")
     else:
         with ThrottleMonitor() as throttle_monitor:
             accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, buffer_time=artifact_request.buffer_time, max_images=artifact_request.max_images, max_dets=artifact_request.max_dets)
