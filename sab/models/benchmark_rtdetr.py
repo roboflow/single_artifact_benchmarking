@@ -6,7 +6,7 @@ import json
 import fire
 
 
-from sab.onnx_inference import ONNXInference
+from sab.onnx_inference import ONNXInferenceCUDA
 from sab.trt_inference import TRTInference
 from sab.models.utils import ArtifactBenchmarkRequest, run_benchmark_on_artifacts, pretty_print_results
 
@@ -28,7 +28,7 @@ def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict) -> tupl
     return bboxes, labels, scores
 
 
-class RTDETRONNXInference(ONNXInference):
+class RTDETRONNXInference(ONNXInferenceCUDA):
     def __init__(self, model_path: str, image_input_name: str|None="images"):
         super().__init__(model_path, image_input_name)
 

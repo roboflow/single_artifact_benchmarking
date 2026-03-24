@@ -3,7 +3,7 @@ import torchvision.transforms.functional as TF
 import json
 import fire
 
-from sab.onnx_inference import ONNXInference
+from sab.onnx_inference import ONNXInferenceCUDA
 from sab.trt_inference import TRTInference
 from sab.models.utils import cxcywh_to_xyxy, ArtifactBenchmarkRequest, run_benchmark_on_artifacts, pretty_print_results
 
@@ -39,7 +39,7 @@ def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict) -> tupl
     return bboxes.contiguous(), labels.contiguous(), scores.contiguous()
 
 
-class LWDETRONNXInference(ONNXInference):
+class LWDETRONNXInference(ONNXInferenceCUDA):
     def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
         return preprocess_image(input_image, self.image_input_shape)
     

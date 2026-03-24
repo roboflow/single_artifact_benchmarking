@@ -5,7 +5,7 @@ import json
 import fire
 
 
-from sab.onnx_inference import ONNXInference
+from sab.onnx_inference import ONNXInferenceCUDA
 from sab.trt_inference import TRTInference
 from sab.models.utils import ArtifactBenchmarkRequest, run_benchmark_on_artifacts, pretty_print_results
 
@@ -79,7 +79,7 @@ def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict) -> tupl
     return bboxes, labels, scores
 
 
-class YOLOv8ONNXInference(ONNXInference):
+class YOLOv8ONNXInference(ONNXInferenceCUDA):
     # reference: https://github.com/ultralytics/ultralytics/blob/3c88bebc9514a4d7f70b771811ddfe3a625ef14d/examples/YOLOv8-OpenCV-ONNX-Python/main.py#L23C57-L31
     def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
         return preprocess_image(input_image, self.image_input_shape)

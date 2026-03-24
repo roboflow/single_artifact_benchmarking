@@ -7,7 +7,7 @@ from supervision.utils.file import read_json_file
 from supervision.dataset.formats.coco import coco_categories_to_classes, build_coco_class_index_mapping
 
 from sab.clock_watch import ThrottleMonitor
-from sab.onnx_inference import ONNXInference
+from sab.onnx_inference import ONNXInferenceCUDA, ONNXInferenceCPU
 from sab.trt_inference import TRTInference, build_engine
 from sab.evaluation import evaluate
 
@@ -48,7 +48,7 @@ def cxcywh_to_xyxy(boxes):
 class ArtifactBenchmarkRequest:
     def __init__(self,
             onnx_path: str,
-            inference_class: type[ONNXInference|TRTInference],
+            inference_class: type[ONNXInferenceCUDA|ONNXInferenceCPU|TRTInference],
             needs_class_remapping: bool = False,
             needs_fp16: bool = False,
             buffer_time: float = 0.0,
@@ -70,6 +70,7 @@ class ArtifactBenchmarkRequest:
             "onnx_path": self.onnx_path,
             "inference_class": self.inference_class.__name__,
             "is_trt": issubclass(self.inference_class, TRTInference),
+            "is_cpu": issubclass(self.inference_class, ONNXInferenceCPU),
             "needs_fp16": self.needs_fp16,
             "buffer_time": self.buffer_time,
             "max_images": self.max_images,
@@ -96,7 +97,7 @@ def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images
             engine_path = artifact_request.onnx_path.replace(".onnx", ".engine")
         else:
             engine_path = artifact_request.onnx_path.replace(".onnx", ".fp16.engine")
-    
+
         if not os.path.exists(engine_path):
             print(f"Building engine for {artifact_request.onnx_path} and saving to {engine_path}...")
             with ThrottleMonitor() as throttle_monitor:
@@ -110,20 +111,25 @@ def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images
     else:
         if artifact_request.needs_fp16:
             raise ValueError("FP16 is not supported for ONNX inference")
-        
+
         inference = artifact_request.inference_class(artifact_request.onnx_path)
-    
+
+    is_cpu = issubclass(artifact_request.inference_class, ONNXInferenceCPU)
+
     throttled = False
-    with ThrottleMonitor() as throttle_monitor:
+    if is_cpu:
         accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, buffer_time=artifact_request.buffer_time, max_images=artifact_request.max_images, max_dets=artifact_request.max_dets)
-        if throttle_monitor.did_throttle():
-            throttled = True
-            print(f"🔴  GPU throttled, latency results are unreliable. Try increasing the buffer time. Current buffer time: {artifact_request.buffer_time}s")
-        else:
-            print("GPU did not throttle during evaluation. Latency numbers should be reliable.")
-    
+    else:
+        with ThrottleMonitor() as throttle_monitor:
+            accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, buffer_time=artifact_request.buffer_time, max_images=artifact_request.max_images, max_dets=artifact_request.max_dets)
+            if throttle_monitor.did_throttle():
+                throttled = True
+                print(f"🔴  GPU throttled, latency results are unreliable. Try increasing the buffer time. Current buffer time: {artifact_request.buffer_time}s")
+            else:
+                print("GPU did not throttle during evaluation. Latency numbers should be reliable.")
+
     latency_stats = inference.profiler.get_stats()
-    
+
     return accuracy_stats, latency_stats, throttled
 
 
@@ -178,7 +184,7 @@ def pretty_print_results(results: list[dict]):
 
     for result in results:
         model     = result['artifact_request']['onnx_path']
-        runtime   = "TRT" if result['artifact_request']['is_trt'] else "ONNX"
+        runtime   = "TRT" if result['artifact_request']['is_trt'] else ("ONNX-CPU" if result['artifact_request'].get('is_cpu') else "ONNX-CUDA")
         fp16      = result['artifact_request']['needs_fp16']
         stats     = result['accuracy_stats']
         map50     = _pct(stats, 1)

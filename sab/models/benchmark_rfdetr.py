@@ -9,7 +9,7 @@ import json
 import fire
 
 
-from sab.onnx_inference import ONNXInference
+from sab.onnx_inference import ONNXInferenceCUDA, ONNXInferenceCPU
 from sab.trt_inference import TRTInference
 from sab.models.utils import cxcywh_to_xyxy, ArtifactBenchmarkRequest, run_benchmark_on_artifacts, pretty_print_results
 
@@ -45,10 +45,18 @@ def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict) -> tupl
     return bboxes.contiguous(), labels.contiguous(), scores.contiguous()
 
 
-class RFDETRONNXInference(ONNXInference):
+class RFDETRONNXInference(ONNXInferenceCUDA):
     def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
         return preprocess_image(input_image, self.image_input_shape)
     
+    def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return postprocess_output(outputs, metadata)
+
+
+class RFDETRONNXCPUInference(ONNXInferenceCPU):
+    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
+        return preprocess_image(input_image, self.image_input_shape)
+
     def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         return postprocess_output(outputs, metadata)
 
@@ -79,6 +87,11 @@ def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, o
             buffer_time=buffer_time,
         ),
         ArtifactBenchmarkRequest(
+            onnx_path="rf-detr-nano.onnx",
+            inference_class=RFDETRONNXCPUInference,
+            buffer_time=buffer_time,
+        ),
+        ArtifactBenchmarkRequest(
             onnx_path="rf-detr-small.onnx",
             inference_class=RFDETRTRTInference,
             needs_fp16=False,
@@ -91,6 +104,11 @@ def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, o
             buffer_time=buffer_time,
         ),
         ArtifactBenchmarkRequest(
+            onnx_path="rf-detr-small.onnx",
+            inference_class=RFDETRONNXCPUInference,
+            buffer_time=buffer_time,
+        ),
+        ArtifactBenchmarkRequest(
             onnx_path="rf-detr-medium.onnx",
             inference_class=RFDETRTRTInference,
             needs_fp16=False,
@@ -100,6 +118,11 @@ def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, o
             onnx_path="rf-detr-medium.onnx",
             inference_class=RFDETRTRTInference,
             needs_fp16=True,
+            buffer_time=buffer_time,
+        ),
+        ArtifactBenchmarkRequest(
+            onnx_path="rf-detr-medium.onnx",
+            inference_class=RFDETRONNXCPUInference,
             buffer_time=buffer_time,
         ),
     ]
