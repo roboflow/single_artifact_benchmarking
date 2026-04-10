@@ -12,6 +12,8 @@ import json
 from tqdm import tqdm
 import time
 
+from sab.onnx_inference import ONNXInferenceCPU
+
 
 def evaluate(inference, image_dir: str, annotations_file_path: str, class_mapping: dict[int, str]|None=None, buffer_time: float=0.0, output_file_name: str|None=None, max_images: int|None=None, max_dets: int=100):
     predictions = []
@@ -29,7 +31,9 @@ def evaluate(inference, image_dir: str, annotations_file_path: str, class_mappin
 
         image = Image.open(image_path).convert("RGB")
         initial_shape = image.size
-        image = TF.to_tensor(image).cuda()
+        image = TF.to_tensor(image)
+        if not isinstance(inference, ONNXInferenceCPU):
+            image = image.cuda()
 
         if inference.prediction_type == "bbox":
             xyxy, class_id, score = inference.infer(image)

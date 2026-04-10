@@ -200,6 +200,56 @@ def enable_persistence(enable: bool) -> None:
     run(["sudo", "nvidia-smi", "-pm", "1" if enable else "0"])
 
 
+class CPUFrequencyMonitor:
+    """Monitors CPU frequency drift during a benchmark run via /proc/cpuinfo."""
+
+    def __init__(self, tolerance_mhz: float = 50.0):
+        self._tolerance_mhz = tolerance_mhz
+        self._baseline_freqs: list[float] | None = None
+        self._end_freqs: list[float] | None = None
+        self._drifted = False
+
+    @staticmethod
+    def _read_cpu_frequencies() -> list[float]:
+        freqs = []
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                if line.startswith("cpu MHz"):
+                    freqs.append(float(line.split(":")[1].strip()))
+        return freqs
+
+    def __enter__(self):
+        try:
+            self._baseline_freqs = self._read_cpu_frequencies()
+        except OSError:
+            self._baseline_freqs = None
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._baseline_freqs is None:
+            return
+        try:
+            self._end_freqs = self._read_cpu_frequencies()
+        except OSError:
+            return
+        for before, after in zip(self._baseline_freqs, self._end_freqs):
+            if abs(before - after) > self._tolerance_mhz:
+                self._drifted = True
+                return
+
+    def did_drift(self) -> bool:
+        return self._drifted
+
+    def get_summary(self) -> dict | None:
+        if self._baseline_freqs is None or self._end_freqs is None:
+            return None
+        return {
+            "baseline_mean_mhz": sum(self._baseline_freqs) / len(self._baseline_freqs),
+            "end_mean_mhz": sum(self._end_freqs) / len(self._end_freqs),
+            "max_drift_mhz": max(abs(b - e) for b, e in zip(self._baseline_freqs, self._end_freqs)),
+        }
+
+
 def main():
     signal.signal(signal.SIGINT, lambda *_: sys.exit(0))   # clean Ctrl-C
     print("🟢  Watching for any GPU clock changes (press Ctrl-C to quit)")
