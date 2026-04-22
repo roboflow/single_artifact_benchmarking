@@ -1,17 +1,41 @@
+import os
 import tensorrt as trt
 import torch
 import numpy as np
 
+from pathlib import Path
+
 from sab.profiler import CUDAProfiler
+
+TIMING_CACHE_PATH = Path.home() / ".cache" / "tensorrt" / "timing.cache"
+
+
+def _load_timing_cache(config):
+    if TIMING_CACHE_PATH.exists():
+        print(f"Loading timing cache from {TIMING_CACHE_PATH}")
+        cache = config.create_timing_cache(TIMING_CACHE_PATH.read_bytes())
+    else:
+        print("No existing timing cache found, creating new one")
+        cache = config.create_timing_cache(b"")
+    config.set_timing_cache(cache, ignore_mismatch=False)
+    return cache
+
+
+def _save_timing_cache(cache):
+    TIMING_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TIMING_CACHE_PATH.write_bytes(cache.serialize())
+    print(f"Timing cache saved to {TIMING_CACHE_PATH}")
 
 
 def build_engine(model_path, engine_path, use_fp16=False):
     logger = trt.Logger(trt.Logger.INFO)
     builder = trt.Builder(logger)
-    
+
     config = builder.create_builder_config()
     if use_fp16:
         config.set_flag(trt.BuilderFlag.FP16)
+
+    timing_cache = _load_timing_cache(config)
 
     EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
     network = builder.create_network(EXPLICIT_BATCH)
@@ -20,7 +44,7 @@ def build_engine(model_path, engine_path, use_fp16=False):
 
     with open(model_path, "rb") as f:
         model_data = f.read()
-    
+
     if not parser.parse(model_data):
         print("Failed to parse ONNX model")
         for error in range(parser.num_errors):
@@ -29,19 +53,19 @@ def build_engine(model_path, engine_path, use_fp16=False):
 
     # Create optimization profile to fix dynamic batch dimensions
     profile = builder.create_optimization_profile()
-    
+
     # Handle dynamic input shapes - fix batch size to 1
     for i in range(network.num_inputs):
         input_tensor = network.get_input(i)
         input_shape = input_tensor.shape
         print(f"Input {i} ({input_tensor.name}): {input_shape}")
-        
+
         # Check if batch dimension is dynamic (typically -1)
         if input_shape[0] == -1:
             # Fix batch size to 1
             fixed_shape = (1,) + tuple(input_shape[1:])
             print(f"  Setting fixed batch shape: {fixed_shape}")
-            
+
             # Set min, optimal, and max shapes all to batch size 1
             profile.set_shape(input_tensor.name, fixed_shape, fixed_shape, fixed_shape)
 
@@ -50,12 +74,14 @@ def build_engine(model_path, engine_path, use_fp16=False):
 
     print(f"Building engine from {model_path} to {engine_path}")
     engine = builder.build_serialized_network(network, config)
-    
+
     if engine is None:
         print("Failed to build engine")
         return None
-        
+
     print(f"Engine built successfully")
+
+    _save_timing_cache(timing_cache)
 
     with open(engine_path, "wb") as f:
         f.write(engine)
