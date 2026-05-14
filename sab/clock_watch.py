@@ -174,7 +174,7 @@ class ThrottleMonitor:
 
 def get_max_clocks() -> tuple[int, int]:
     """Get the maximum GPU and memory clocks."""
-    res = run(["sudo", "nvidia-smi", "--query-gpu=clocks.max.graphics,clocks.max.memory", "--format=csv,noheader"], capture_output=True)
+    res = run(["nvidia-smi", "--query-gpu=clocks.max.graphics,clocks.max.memory", "--format=csv,noheader"], capture_output=True)
     output = res.stdout.decode("utf-8").splitlines()[0].strip()
     # Parse comma-separated values and remove "MHz" suffix
     gpu_clock_str, mem_clock_str = output.split(',')
@@ -185,19 +185,19 @@ def get_max_clocks() -> tuple[int, int]:
 
 def lock_clocks(gpu_mhz: int, mem_mhz: int|None = None) -> None:
     """Lock GPU and memory clocks (requires root)."""
-    run(["sudo", "nvidia-smi", "--lock-gpu-clocks", str(gpu_mhz)])
+    run(["nvidia-smi", "--lock-gpu-clocks", str(gpu_mhz)])
     if mem_mhz:
-        run(["sudo", "nvidia-smi", "--lock-memory-clocks", str(mem_mhz)])
+        run(["nvidia-smi", "--lock-memory-clocks", str(mem_mhz)])
 
 
 def unlock_clocks() -> None:
     """Reset GPU and memory clocks (requires root)."""
-    run(["sudo", "nvidia-smi", "--reset-gpu-clocks"])
-    run(["sudo", "nvidia-smi", "--reset-memory-clocks"])
+    run(["nvidia-smi", "--reset-gpu-clocks"])
+    run(["nvidia-smi", "--reset-memory-clocks"])
 
 
 def enable_persistence(enable: bool) -> None:
-    run(["sudo", "nvidia-smi", "-pm", "1" if enable else "0"])
+    run(["nvidia-smi", "-pm", "1" if enable else "0"])
 
 
 def main():
