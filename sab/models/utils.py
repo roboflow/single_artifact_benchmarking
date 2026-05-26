@@ -55,6 +55,7 @@ class ArtifactBenchmarkRequest:
             max_images: int|None = None,
             graph_surgery_func: Callable[str, str]|None = None,
             max_dets: int = 100,
+            is_jetson: bool = False,
         ):
         self.onnx_path = onnx_path
         self.inference_class = inference_class
@@ -64,6 +65,7 @@ class ArtifactBenchmarkRequest:
         self.max_images = max_images
         self.graph_surgery_func = graph_surgery_func
         self.max_dets = max_dets
+        self.is_jetson = is_jetson
         
     def dump(self):
         return {
@@ -100,7 +102,7 @@ def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images
 
         if not os.path.exists(engine_path):
             print(f"Building engine for {artifact_request.onnx_path} and saving to {engine_path}...")
-            with ThrottleMonitor() as throttle_monitor:
+            with ThrottleMonitor(is_jetson=artifact_request.is_jetson) as throttle_monitor:
                 build_engine(artifact_request.onnx_path, engine_path, use_fp16=artifact_request.needs_fp16)
                 if throttle_monitor.did_throttle():
                     print("GPU throttled during engine build. This is expected and is a limitation of TensorRT.")
@@ -127,7 +129,7 @@ def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images
             else:
                 print("CPU frequency stable during evaluation. Latency numbers should be reliable.")
     else:
-        with ThrottleMonitor() as throttle_monitor:
+        with ThrottleMonitor(is_jetson=artifact_request.is_jetson) as throttle_monitor:
             accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, buffer_time=artifact_request.buffer_time, max_images=artifact_request.max_images, max_dets=artifact_request.max_dets)
             if throttle_monitor.did_throttle():
                 throttled = True

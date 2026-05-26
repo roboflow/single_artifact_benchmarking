@@ -97,11 +97,12 @@ def emit_clock_changes():
         yield sm.value, mem.value, reason_txt
 
 class ThrottleMonitor:
-    def __init__(self, target_freq: int|None=None):
+    def __init__(self, target_freq: int|None=None, is_jetson: bool = False):
         self._throttle_detected = False
         self._target_freq = target_freq
         self._stop_thread = False
         self._thread = None
+        self._is_jetson = is_jetson
     
     def _check_for_throttling(self):
         # Get the generator
@@ -160,6 +161,9 @@ class ThrottleMonitor:
     #         enable_persistence(False)
     #         unlock_clocks()
     def __enter__(self):
+        if self._is_jetson:
+            return self
+
         gpu_clock, mem_clock = get_max_clocks()
         enable_persistence(True)
         lock_clocks(gpu_clock, mem_clock)
@@ -167,6 +171,9 @@ class ThrottleMonitor:
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._is_jetson:
+            return
+
         self.stop()
         enable_persistence(False)
         unlock_clocks()
