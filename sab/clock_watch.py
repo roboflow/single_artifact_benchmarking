@@ -19,20 +19,26 @@ NVML_TIMEOUT = 1000  # ms
 # ──────────────────────────────────────────────────────────────────────────────
 # 1.  Load NVML and declare the handful of functions we need
 # ──────────────────────────────────────────────────────────────────────────────
+# NVML lives in the NVIDIA driver (libnvidia-ml.so.1), which is injected by GPU
+# nodes but ABSENT on CPU-only nodes. Load it lazily so importing this module
+# (and therefore sab.models.utils) does not crash on a CPU-only machine -- the
+# CPU benchmarking path uses CPUFrequencyMonitor, not the NVML ThrottleMonitor.
 lib_path = ctypes.util.find_library("nvidia-ml")
-if not lib_path:
-    sys.exit("NVML library not found – is the NVIDIA driver installed?")
-nvml = ct.CDLL(lib_path)
+try:
+    nvml = ct.CDLL(lib_path) if lib_path else None
+except OSError:
+    nvml = None
 
-for name in (
-    "nvmlInit_v2", "nvmlShutdown",
-    "nvmlDeviceGetHandleByIndex_v2",
-    "nvmlEventSetCreate", "nvmlEventSetFree",
-    "nvmlDeviceRegisterEvents", "nvmlEventSetWait",
-    "nvmlDeviceGetCurrentClocksThrottleReasons",
-    "nvmlDeviceGetClockInfo",
-):
-    getattr(nvml, name).restype = ct.c_int  # all return nvmlReturn_t
+if nvml is not None:
+    for name in (
+        "nvmlInit_v2", "nvmlShutdown",
+        "nvmlDeviceGetHandleByIndex_v2",
+        "nvmlEventSetCreate", "nvmlEventSetFree",
+        "nvmlDeviceRegisterEvents", "nvmlEventSetWait",
+        "nvmlDeviceGetCurrentClocksThrottleReasons",
+        "nvmlDeviceGetClockInfo",
+    ):
+        getattr(nvml, name).restype = ct.c_int  # all return nvmlReturn_t
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 2.  NVML constants we need (from the public headers)
@@ -66,6 +72,11 @@ def chk(ret, func):
         sys.exit(f"{func} failed with code {ret}")
 
 def emit_clock_changes():
+    if nvml is None:
+        raise RuntimeError(
+            "NVML unavailable (no NVIDIA driver) -- ThrottleMonitor needs a GPU node; "
+            "use CPUFrequencyMonitor for CPU benchmarking."
+        )
     chk(nvml.nvmlInit_v2(), "nvmlInit")
 
     dev = ct.c_void_p()
