@@ -57,6 +57,11 @@ def parse_args(argv=None):
     parser.add_argument("--output-dir", default=env("SAB_OUTPUT_DIR", "/results"))
     parser.add_argument("--buffer-time", type=float, default=float(env("SAB_BUFFER_TIME", "0.2")))
     parser.add_argument("--max-images", type=int, default=int(env("SAB_MAX_IMAGES", "0")) or None)
+    parser.add_argument(
+        "--yololite-onnx",
+        default=env("SAB_YOLOLITE_ONNX") or None,
+        help="Path to a decoded yololite ONNX file. Without it, the yololite entry is skipped.",
+    )
     parser.add_argument("--list", action="store_true", help="Print all valid model names and exit.")
     args = parser.parse_args(argv)
 
@@ -80,6 +85,7 @@ def run_named_model(key: str, args, hardware: str) -> dict:
         buffer_time=args.buffer_time,
         max_images=args.max_images,
         is_jetson=hardware == "AI1",
+        local_onnx=args.yololite_onnx if key == "yololite" else None,
     )
     accuracy_stats, latency_stats, throttled = run_benchmark_on_artifact(
         request,
@@ -121,6 +127,9 @@ def main(argv=None):
         environment = collect_environment()
         results = []
         for key in named_selected:
+            if key == "yololite" and args.yololite_onnx is None:
+                print("Skipping yololite: no --yololite-onnx path given")
+                continue
             output_file = os.path.join(named_dir, f"{key}.json")
             if os.path.exists(output_file):
                 print(f"Skipping {key}: {output_file} exists")
