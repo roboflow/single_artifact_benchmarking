@@ -34,7 +34,7 @@ COPY . /sab
 RUN pip install --no-cache-dir --no-deps .
 
 # This check fails the build if an install changed the serving stack.
-RUN python -c "import torch, tensorrt, onnxruntime, sab, sab.environment, sab.models.utils"
+RUN python -c "import torch, tensorrt, onnxruntime, sab, sab.environment, sab.models.utils, sab.models.benchmark_rfdetr, sab.models.benchmark_yolov11_seg"
 
 # The serving base image starts the inference server by default. This image is
 # a benchmark harness, so reset the entrypoint and give the run command on the
