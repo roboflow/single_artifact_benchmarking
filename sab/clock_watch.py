@@ -7,6 +7,8 @@ Tested on Tesla T4 / driver R555, but works on any dGPU that supports NVML event
 import ctypes as ct
 import ctypes.util
 import datetime
+import os
+import shutil
 import signal
 import sys
 import threading
@@ -19,20 +21,25 @@ NVML_TIMEOUT = 1000  # ms
 # ──────────────────────────────────────────────────────────────────────────────
 # 1.  Load NVML and declare the handful of functions we need
 # ──────────────────────────────────────────────────────────────────────────────
+# NVML lives in the NVIDIA driver (libnvidia-ml.so.1), absent on CPU-only and
+# some Jetson environments. Load it best-effort so importing this module (and
+# therefore sab.models.utils) never crashes on machines without the driver.
 lib_path = ctypes.util.find_library("nvidia-ml")
-if not lib_path:
-    sys.exit("NVML library not found – is the NVIDIA driver installed?")
-nvml = ct.CDLL(lib_path)
+try:
+    nvml = ct.CDLL(lib_path) if lib_path else None
+except OSError:
+    nvml = None
 
-for name in (
-    "nvmlInit_v2", "nvmlShutdown",
-    "nvmlDeviceGetHandleByIndex_v2",
-    "nvmlEventSetCreate", "nvmlEventSetFree",
-    "nvmlDeviceRegisterEvents", "nvmlEventSetWait",
-    "nvmlDeviceGetCurrentClocksThrottleReasons",
-    "nvmlDeviceGetClockInfo",
-):
-    getattr(nvml, name).restype = ct.c_int  # all return nvmlReturn_t
+if nvml is not None:
+    for name in (
+        "nvmlInit_v2", "nvmlShutdown",
+        "nvmlDeviceGetHandleByIndex_v2",
+        "nvmlEventSetCreate", "nvmlEventSetFree",
+        "nvmlDeviceRegisterEvents", "nvmlEventSetWait",
+        "nvmlDeviceGetCurrentClocksThrottleReasons",
+        "nvmlDeviceGetClockInfo",
+    ):
+        getattr(nvml, name).restype = ct.c_int  # all return nvmlReturn_t
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 2.  NVML constants we need (from the public headers)
@@ -62,10 +69,16 @@ class Event(ct.Structure):        # minimal nvmlEventData_t
 
 def chk(ret, func):
     if ret != NVML_SUCCESS:
-        nvml.nvmlShutdown()
+        if nvml is not None:
+            nvml.nvmlShutdown()
         sys.exit(f"{func} failed with code {ret}")
 
 def emit_clock_changes():
+    if nvml is None:
+        raise RuntimeError(
+            "NVML unavailable (no NVIDIA driver) – ThrottleMonitor needs a GPU node; "
+            "use CPUFrequencyMonitor for CPU benchmarking."
+        )
     chk(nvml.nvmlInit_v2(), "nvmlInit")
 
     dev = ct.c_void_p()
@@ -97,11 +110,14 @@ def emit_clock_changes():
         yield sm.value, mem.value, reason_txt
 
 class ThrottleMonitor:
-    def __init__(self, target_freq: int|None=None):
+    def __init__(self, target_freq: int|None=None, is_jetson: bool = False):
         self._throttle_detected = False
         self._target_freq = target_freq
         self._stop_thread = False
         self._thread = None
+        # Jetson has no nvidia-smi clock locking and unreliable NVML events;
+        # the monitor becomes a no-op there and throttling goes undetected.
+        self._is_jetson = is_jetson
     
     def _check_for_throttling(self):
         # Get the generator
@@ -160,21 +176,36 @@ class ThrottleMonitor:
     #         enable_persistence(False)
     #         unlock_clocks()
     def __enter__(self):
+        if self._is_jetson:
+            return self
+
         gpu_clock, mem_clock = get_max_clocks()
         enable_persistence(True)
         lock_clocks(gpu_clock, mem_clock)
         self.monitor_throttling(gpu_clock)
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._is_jetson:
+            return
+
         self.stop()
         enable_persistence(False)
         unlock_clocks()
 
 
+def _nvidia_smi(*args: str, capture_output: bool = False):
+    # Clock locking needs root. In containers we already run as root (and sudo
+    # doesn't exist); on bare-metal dev boxes we need sudo.
+    command = ["nvidia-smi", *args]
+    if os.geteuid() != 0 and shutil.which("sudo"):
+        command = ["sudo", *command]
+    return run(command, capture_output=capture_output)
+
+
 def get_max_clocks() -> tuple[int, int]:
     """Get the maximum GPU and memory clocks."""
-    res = run(["sudo", "nvidia-smi", "--query-gpu=clocks.max.graphics,clocks.max.memory", "--format=csv,noheader"], capture_output=True)
+    res = _nvidia_smi("--query-gpu=clocks.max.graphics,clocks.max.memory", "--format=csv,noheader", capture_output=True)
     output = res.stdout.decode("utf-8").splitlines()[0].strip()
     # Parse comma-separated values and remove "MHz" suffix
     gpu_clock_str, mem_clock_str = output.split(',')
@@ -185,19 +216,19 @@ def get_max_clocks() -> tuple[int, int]:
 
 def lock_clocks(gpu_mhz: int, mem_mhz: int|None = None) -> None:
     """Lock GPU and memory clocks (requires root)."""
-    run(["sudo", "nvidia-smi", "--lock-gpu-clocks", str(gpu_mhz)])
+    _nvidia_smi("--lock-gpu-clocks", str(gpu_mhz))
     if mem_mhz:
-        run(["sudo", "nvidia-smi", "--lock-memory-clocks", str(mem_mhz)])
+        _nvidia_smi("--lock-memory-clocks", str(mem_mhz))
 
 
 def unlock_clocks() -> None:
     """Reset GPU and memory clocks (requires root)."""
-    run(["sudo", "nvidia-smi", "--reset-gpu-clocks"])
-    run(["sudo", "nvidia-smi", "--reset-memory-clocks"])
+    _nvidia_smi("--reset-gpu-clocks")
+    _nvidia_smi("--reset-memory-clocks")
 
 
 def enable_persistence(enable: bool) -> None:
-    run(["sudo", "nvidia-smi", "-pm", "1" if enable else "0"])
+    _nvidia_smi("-pm", "1" if enable else "0")
 
 
 class CPUFrequencyMonitor:

@@ -1,0 +1,7 @@
+# Deps SAB needs that the pinned serving images do not already provide.
+# Installed with --no-deps: nothing here may pull in (or upgrade) torch,
+# tensorrt, onnxruntime, numpy, or anything else from the serving stack.
+# Curated per base image; the Dockerfile smoke-import RUN catches drift.
+fire==0.7.0
+faster-coco-eval==1.6.7
+tqdm==4.67.1

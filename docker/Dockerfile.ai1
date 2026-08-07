@@ -1,0 +1,36 @@
+# SAB benchmarking image for AI1 (Advantech ICAM-540, Jetson Orin NX, JetPack 6.2).
+#
+# Base = the roboflow-edge JetPack 6.2 image: the AI1's actual deployment
+# context (same pin style as rf-detr-internal scripts/ai1_latencies/Dockerfile.ai1,
+# which produced the production AI1 NAS tables). Pinned by sha tag; bump
+# deliberately, never track :latest. Build on-device or with an arm64 builder.
+ARG BASE_IMAGE=repo.roboflow.com/roboflow-edge/roboflow-edge-jp62:787d213450d1f5f90eb7831bcc2f02aa78886a48
+FROM ${BASE_IMAGE}
+
+ARG BASE_IMAGE
+ARG SAB_GIT_SHA=unknown
+
+LABEL org.opencontainers.image.source="https://github.com/roboflow/single_artifact_benchmarking" \
+      org.opencontainers.image.revision="${SAB_GIT_SHA}" \
+      com.roboflow.sab.hardware="AI1" \
+      com.roboflow.sab.base_image="${BASE_IMAGE}"
+
+# Baked so sab.environment.collect_environment() records provenance at runtime;
+# SAB_HARDWARE also makes scripts/get_sab_latencies.py default to --hardware ai1.
+ENV SAB_BASE_IMAGE="${BASE_IMAGE}" \
+    SAB_GIT_SHA="${SAB_GIT_SHA}" \
+    SAB_HARDWARE="AI1" \
+    SAB_CACHE_DIR=/cache
+
+WORKDIR /sab
+
+# --no-deps is load-bearing throughout: SAB's requirements.txt pins tensorrt/torch
+# and must never override the serving image's stack.
+COPY docker/requirements-lite.txt /sab/docker/requirements-lite.txt
+RUN pip install --no-cache-dir --no-deps -r docker/requirements-lite.txt
+
+COPY . /sab
+RUN pip install --no-cache-dir --no-deps .
+
+# Fails the build if the lite requirements poisoned the serving stack.
+RUN python -c "import torch, tensorrt, onnxruntime, sab, sab.environment, sab.models.utils"

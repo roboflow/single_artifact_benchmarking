@@ -1,17 +1,49 @@
+import os
+
 import tensorrt as trt
 import torch
 import numpy as np
 
+from pathlib import Path
+
 from sab.profiler import CUDAProfiler
+
+
+def _timing_cache_path() -> Path:
+    # Keyed by TRT version: a timing cache from another TRT build is invalid
+    # and must not be shared across serving-image upgrades via a mounted cache.
+    cache_root = Path(os.environ.get("SAB_CACHE_DIR", Path.home() / ".cache"))
+    return cache_root / "tensorrt" / f"timing-trt{trt.__version__}.cache"
+
+
+def _load_timing_cache(config):
+    timing_cache_path = _timing_cache_path()
+    if timing_cache_path.exists():
+        print(f"Loading timing cache from {timing_cache_path}")
+        cache = config.create_timing_cache(timing_cache_path.read_bytes())
+    else:
+        print("No existing timing cache found, creating new one")
+        cache = config.create_timing_cache(b"")
+    config.set_timing_cache(cache, ignore_mismatch=False)
+    return cache
+
+
+def _save_timing_cache(cache):
+    timing_cache_path = _timing_cache_path()
+    timing_cache_path.parent.mkdir(parents=True, exist_ok=True)
+    timing_cache_path.write_bytes(cache.serialize())
+    print(f"Timing cache saved to {timing_cache_path}")
 
 
 def build_engine(model_path, engine_path, use_fp16=False):
     logger = trt.Logger(trt.Logger.INFO)
     builder = trt.Builder(logger)
-    
+
     config = builder.create_builder_config()
     if use_fp16:
         config.set_flag(trt.BuilderFlag.FP16)
+
+    timing_cache = _load_timing_cache(config)
 
     EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
     network = builder.create_network(EXPLICIT_BATCH)
@@ -56,6 +88,8 @@ def build_engine(model_path, engine_path, use_fp16=False):
         return None
         
     print(f"Engine built successfully")
+
+    _save_timing_cache(timing_cache)
 
     with open(engine_path, "wb") as f:
         f.write(engine)
