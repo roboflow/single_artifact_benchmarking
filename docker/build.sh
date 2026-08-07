@@ -4,9 +4,9 @@
 # Usage:
 #   docker/build.sh t4|ai1 [extra docker build args...]
 #
-# Bakes the current git commit into the image (SAB_GIT_SHA) so results carry
-# provenance. Refuses to build from a dirty worktree: the baked SHA must
-# describe the code actually in the image.
+# The script bakes the current git commit into the image (SAB_GIT_SHA), so
+# results carry provenance. It refuses to build from a dirty worktree, because
+# the baked SHA must describe the code that is in the image.
 set -euo pipefail
 
 if [[ $# -lt 1 || ! "$1" =~ ^(t4|ai1)$ ]]; then
@@ -21,7 +21,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
 if [[ -n "$(git status --porcelain)" ]]; then
-    echo "error: worktree is dirty; commit or stash before building so SAB_GIT_SHA is truthful" >&2
+    echo "error: the worktree is dirty. Commit or stash your changes, so the baked SAB_GIT_SHA describes the image." >&2
     exit 1
 fi
 

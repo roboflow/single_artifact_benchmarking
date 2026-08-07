@@ -21,9 +21,9 @@ NVML_TIMEOUT = 1000  # ms
 # ──────────────────────────────────────────────────────────────────────────────
 # 1.  Load NVML and declare the handful of functions we need
 # ──────────────────────────────────────────────────────────────────────────────
-# NVML lives in the NVIDIA driver (libnvidia-ml.so.1), absent on CPU-only and
-# some Jetson environments. Load it best-effort so importing this module (and
-# therefore sab.models.utils) never crashes on machines without the driver.
+# NVML is part of the NVIDIA driver (libnvidia-ml.so.1). CPU-only machines and
+# some Jetson environments do not have it. The import of this module (and thus
+# sab.models.utils) must not crash there, so a failed load sets nvml to None.
 lib_path = ctypes.util.find_library("nvidia-ml")
 try:
     nvml = ct.CDLL(lib_path) if lib_path else None
@@ -76,8 +76,8 @@ def chk(ret, func):
 def emit_clock_changes():
     if nvml is None:
         raise RuntimeError(
-            "NVML unavailable (no NVIDIA driver) – ThrottleMonitor needs a GPU node; "
-            "use CPUFrequencyMonitor for CPU benchmarking."
+            "NVML is not available (no NVIDIA driver). ThrottleMonitor needs a "
+            "GPU node. Use CPUFrequencyMonitor for CPU benchmarking."
         )
     chk(nvml.nvmlInit_v2(), "nvmlInit")
 
@@ -115,8 +115,8 @@ class ThrottleMonitor:
         self._target_freq = target_freq
         self._stop_thread = False
         self._thread = None
-        # Jetson has no nvidia-smi clock locking and unreliable NVML events;
-        # the monitor becomes a no-op there and throttling goes undetected.
+        # Jetson has no nvidia-smi clock locking, and its NVML events are not
+        # reliable. The monitor does nothing there, and throttling is not detected.
         self._is_jetson = is_jetson
     
     def _check_for_throttling(self):
@@ -195,8 +195,8 @@ class ThrottleMonitor:
 
 
 def _nvidia_smi(*args: str, capture_output: bool = False):
-    # Clock locking needs root. In containers we already run as root (and sudo
-    # doesn't exist); on bare-metal dev boxes we need sudo.
+    # Clock locking needs root. Containers run as root and have no sudo.
+    # Bare-metal dev boxes need sudo.
     command = ["nvidia-smi", *args]
     if os.geteuid() != 0 and shutil.which("sudo"):
         command = ["sudo", *command]

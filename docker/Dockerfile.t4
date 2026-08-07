@@ -1,8 +1,8 @@
 # SAB benchmarking image for NVIDIA T4 (hosted GPU inference deployment context).
 #
-# Base = the canonical GPU serving image (inference repo Dockerfile.onnx.gpu):
-# the TensorRT/CUDA/torch stack customers actually deploy to. Pinned by digest
-# so benchmarks are reproducible; bump deliberately, never track :latest.
+# The base is the canonical GPU serving image (inference repo Dockerfile.onnx.gpu).
+# It holds the TensorRT/CUDA/torch stack that customers deploy to. The digest pin
+# makes benchmarks reproducible. Change the pin in its own commit. Do not use :latest.
 ARG BASE_IMAGE=roboflow/roboflow-inference-server-gpu:1.3.9@sha256:1d36a5544961634620073d55f8ef1c4f89cf06b3ba17178fca1dfe0f0fb314a6
 FROM ${BASE_IMAGE}
 
@@ -14,7 +14,7 @@ LABEL org.opencontainers.image.source="https://github.com/roboflow/single_artifa
       com.roboflow.sab.hardware="T4" \
       com.roboflow.sab.base_image="${BASE_IMAGE}"
 
-# Baked so sab.environment.collect_environment() records provenance at runtime.
+# sab.environment.collect_environment() reads these values at runtime.
 ENV SAB_BASE_IMAGE="${BASE_IMAGE}" \
     SAB_GIT_SHA="${SAB_GIT_SHA}" \
     SAB_HARDWARE="T4" \
@@ -22,13 +22,13 @@ ENV SAB_BASE_IMAGE="${BASE_IMAGE}" \
 
 WORKDIR /sab
 
-# --no-deps is load-bearing throughout: SAB's requirements.txt pins tensorrt/torch
-# and must never override the serving image's stack.
+# Every pip install must use --no-deps. SAB's requirements.txt pins tensorrt and
+# torch, and those pins must not override the serving image's stack.
 COPY docker/requirements-lite.txt /sab/docker/requirements-lite.txt
 RUN pip install --no-cache-dir --no-deps -r docker/requirements-lite.txt
 
 COPY . /sab
 RUN pip install --no-cache-dir --no-deps .
 
-# Fails the build if the lite requirements poisoned the serving stack.
+# This check fails the build if an install changed the serving stack.
 RUN python -c "import torch, tensorrt, onnxruntime, sab, sab.environment, sab.models.utils"

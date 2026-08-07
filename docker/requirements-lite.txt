@@ -1,7 +1,8 @@
-# Deps SAB needs that the pinned serving images do not already provide.
-# Installed with --no-deps: nothing here may pull in (or upgrade) torch,
-# tensorrt, onnxruntime, numpy, or anything else from the serving stack.
-# Curated per base image; the Dockerfile smoke-import RUN catches drift.
+# Dependencies that SAB needs and the pinned serving images do not contain.
+# pip installs them with --no-deps. No entry here can add or upgrade torch,
+# tensorrt, onnxruntime, numpy, or any other part of the serving stack.
+# The list is curated per base image. The import check in each Dockerfile
+# finds drift at build time.
 fire==0.7.0
 faster-coco-eval==1.6.7
 tqdm==4.67.1

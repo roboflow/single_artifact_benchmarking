@@ -1,7 +1,7 @@
-"""Debug helper: benchmark one local ONNX file with the standard protocol.
+"""Debug helper that benchmarks one local ONNX file with the standard protocol.
 
-Port of rf-detr-internal scripts/ai1_latencies/run_single_onnx_ai1.py,
-hardware-agnostic.
+This is a port of rf-detr-internal scripts/ai1_latencies/run_single_onnx_ai1.py.
+It works for each hardware target.
 """
 
 import argparse

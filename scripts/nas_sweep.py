@@ -1,14 +1,16 @@
-"""NAS candidate latency sweep, hardware-agnostic.
+"""NAS candidate latency sweep for any hardware target.
 
-Port of rf-detr-internal scripts/ai1_latencies/get_ai1_latencies.py, which
-produced the production AI1 NAS timing tables. Differences: works for any
-hardware target (T4, AI1), writes latency_stats keyed by hardware (the shape
-rfdetr_internal.engine.load_timing_results_file consumes), records the ONNX
-sha256 per entry, and writes an environment sidecar (<output>.meta.json).
+This is a port of rf-detr-internal scripts/ai1_latencies/get_ai1_latencies.py,
+which produced the production AI1 NAS timing tables. It differs in four ways.
+It works for each hardware target (T4, AI1). It keys latency_stats by
+hardware, the shape that rfdetr_internal.engine.load_timing_results_file
+reads. It records the ONNX sha256 in each entry. It writes an environment
+sidecar (<output>.meta.json).
 
-The results file shape is load-bearing: every entry must keep the fields
-resolution/patch_size/num_windows/dec_layers/num_queries/score/latency_stats/
-throttled. New fields may only be added, never renamed or nested differently.
+The results file shape is a contract. Every entry must keep the fields
+resolution, patch_size, num_windows, dec_layers, num_queries, score,
+latency_stats, and throttled. You can add new fields. You must not rename
+fields or change their nesting.
 """
 
 import json
@@ -71,7 +73,7 @@ def _download_onnx(onnx_url: str, onnx_local_path: str) -> bool:
         raise ValueError(f"Refusing to fetch non-HTTP(S) ONNX URL: {onnx_url}")
     print(f"Downloading ONNX from {onnx_url} ...")
     try:
-        # Scheme validated above; onnx_url_base entries are trusted GCS buckets.
+        # The scheme check is above. The onnx_url_base entries are trusted GCS buckets.
         urllib.request.urlretrieve(onnx_url, onnx_local_path)  # noqa: S310
     except Exception as e:
         print(f"Failed to download ONNX: {e}, skipping.")
@@ -107,8 +109,8 @@ def build_candidate_entry(
     throttled: bool,
     onnx_sha256: str,
 ) -> dict:
-    # Field names and nesting are the production NAS table contract consumed by
-    # rfdetr_internal.engine.load_timing_results_file; only additive changes allowed.
+    # The field names and nesting are the production NAS table contract that
+    # rfdetr_internal.engine.load_timing_results_file reads. Only add fields.
     return {
         "num_queries": num_queries,
         "resolution": resolution,
@@ -130,8 +132,8 @@ def run_sweep(
     buffer_time: float = 0.2,
     max_images: int | None = None,
 ) -> list[dict]:
-    # Deferred imports: keep this module importable on machines without
-    # torch/tensorrt (tests, --list).
+    # These imports stay in the function. The module then imports on machines
+    # without torch or tensorrt (tests, --list).
     from sab.models.benchmark_rfdetr import RFDETRTRTInference
     from sab.models.utils import ArtifactBenchmarkRequest, run_benchmark_on_artifact
 

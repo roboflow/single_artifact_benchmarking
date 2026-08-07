@@ -39,7 +39,8 @@ def test_collect_environment_reads_baked_env_vars(monkeypatch):
 
 
 def test_collect_environment_ignores_unknown_sha_sentinel(monkeypatch):
-    # Dockerfiles default SAB_GIT_SHA=unknown; that must not masquerade as a commit.
+    # The Dockerfiles default SAB_GIT_SHA to "unknown". That value must not
+    # appear as a commit.
     monkeypatch.setenv("SAB_GIT_SHA", "unknown")
     env = collect_environment()
     assert env["sab_commit"] != "unknown"

@@ -1,9 +1,10 @@
 """Environment metadata for benchmark artifacts.
 
-Latency numbers are only comparable within a known software/hardware stack.
-This module captures that stack so results files are self-describing. Every
-probe degrades to None rather than raising: the module must work on GPU-less
-dev machines, CPU-only nodes, and Jetson devices alike.
+Latency numbers are only comparable within a known software and hardware
+stack. This module records that stack, so each results file describes its own
+provenance. Every probe returns None on failure and never raises. As a
+result, the module works on GPU-less dev machines, CPU-only nodes, and
+Jetson devices.
 """
 
 import datetime

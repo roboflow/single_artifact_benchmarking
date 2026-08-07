@@ -1,9 +1,10 @@
 """Standardized latency benchmarking entry point.
 
-Runs the NAS candidate sweeps and/or named-model benchmarks for one hardware
-target under the pinned docker environment (see docker/README.md). By default
-runs everything; use --models to select a subset. All flags default from
-SAB_* env vars so the same script works as a container/service entrypoint.
+This script benchmarks NAS candidates and named models for one hardware
+target in the pinned docker environment (see docker/README.md). By default,
+it runs all NAS parent sweeps and all named models. Use --models to run a
+subset. Each flag defaults from a SAB_* environment variable. As a result,
+the same script works as a container or service entrypoint.
 
 Examples:
     python scripts/get_sab_latencies.py --list
@@ -44,7 +45,7 @@ def parse_args(argv=None):
         "--hardware",
         choices=sorted(HARDWARE_LABELS),
         default=env("SAB_HARDWARE", "").lower() or None,
-        help="Hardware target; defaults from SAB_HARDWARE (baked into the docker images).",
+        help="Hardware target. Defaults from SAB_HARDWARE, which the docker images set.",
     )
     parser.add_argument(
         "--models",

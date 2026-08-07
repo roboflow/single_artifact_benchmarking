@@ -1,9 +1,10 @@
 # SAB benchmarking image for AI1 (Advantech ICAM-540, Jetson Orin NX, JetPack 6.2).
 #
-# Base = the roboflow-edge JetPack 6.2 image: the AI1's actual deployment
-# context (same pin style as rf-detr-internal scripts/ai1_latencies/Dockerfile.ai1,
-# which produced the production AI1 NAS tables). Pinned by sha tag; bump
-# deliberately, never track :latest. Build on-device or with an arm64 builder.
+# The base is the roboflow-edge JetPack 6.2 image, the deployment context of the
+# AI1. The pin style matches rf-detr-internal scripts/ai1_latencies/Dockerfile.ai1,
+# which produced the production AI1 NAS tables. The sha tag is immutable. Change
+# the pin in its own commit. Do not use :latest. Build on the device or with an
+# arm64 builder.
 ARG BASE_IMAGE=repo.roboflow.com/roboflow-edge/roboflow-edge-jp62:787d213450d1f5f90eb7831bcc2f02aa78886a48
 FROM ${BASE_IMAGE}
 
@@ -15,8 +16,8 @@ LABEL org.opencontainers.image.source="https://github.com/roboflow/single_artifa
       com.roboflow.sab.hardware="AI1" \
       com.roboflow.sab.base_image="${BASE_IMAGE}"
 
-# Baked so sab.environment.collect_environment() records provenance at runtime;
-# SAB_HARDWARE also makes scripts/get_sab_latencies.py default to --hardware ai1.
+# sab.environment.collect_environment() reads these values at runtime. SAB_HARDWARE
+# also sets the default --hardware for scripts/get_sab_latencies.py.
 ENV SAB_BASE_IMAGE="${BASE_IMAGE}" \
     SAB_GIT_SHA="${SAB_GIT_SHA}" \
     SAB_HARDWARE="AI1" \
@@ -24,13 +25,13 @@ ENV SAB_BASE_IMAGE="${BASE_IMAGE}" \
 
 WORKDIR /sab
 
-# --no-deps is load-bearing throughout: SAB's requirements.txt pins tensorrt/torch
-# and must never override the serving image's stack.
+# Every pip install must use --no-deps. SAB's requirements.txt pins tensorrt and
+# torch, and those pins must not override the serving image's stack.
 COPY docker/requirements-lite.txt /sab/docker/requirements-lite.txt
 RUN pip install --no-cache-dir --no-deps -r docker/requirements-lite.txt
 
 COPY . /sab
 RUN pip install --no-cache-dir --no-deps .
 
-# Fails the build if the lite requirements poisoned the serving stack.
+# This check fails the build if an install changed the serving stack.
 RUN python -c "import torch, tensorrt, onnxruntime, sab, sab.environment, sab.models.utils"

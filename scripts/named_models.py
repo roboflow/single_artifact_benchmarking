@@ -1,8 +1,8 @@
 """Named trainable model registry for standardized latency benchmarking.
 
-Every entry benchmarks a TensorRT FP16 engine at batch 1 -- the same protocol
-the NAS timing tables use -- so named models and NAS children are directly
-comparable on a latency vs accuracy pareto chart.
+Every entry benchmarks a TensorRT FP16 engine at batch 1. This is the same
+protocol that the NAS timing tables use. As a result, named models and NAS
+children are directly comparable on a latency vs accuracy pareto chart.
 """
 
 from dataclasses import dataclass

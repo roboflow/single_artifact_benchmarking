@@ -10,8 +10,9 @@ from sab.profiler import CUDAProfiler
 
 
 def _timing_cache_path() -> Path:
-    # Keyed by TRT version: a timing cache from another TRT build is invalid
-    # and must not be shared across serving-image upgrades via a mounted cache.
+    # The file name includes the TRT version. A timing cache from a different
+    # TRT build is invalid, and a mounted cache volume must not carry it across
+    # serving-image upgrades.
     cache_root = Path(os.environ.get("SAB_CACHE_DIR", Path.home() / ".cache"))
     return cache_root / "tensorrt" / f"timing-trt{trt.__version__}.cache"
 

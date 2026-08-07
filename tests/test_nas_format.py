@@ -1,13 +1,13 @@
 """Guard the NAS timing table contract.
 
-rf-detr-internal's rfdetr_internal.engine reads timing files as:
-  - json.load -> dict (keyed by config) or list of entries
-  - list(d.values()) when dict; every entry must expose latency_stats
+rfdetr_internal.engine (rf-detr-internal repo) reads timing files as follows:
+  - json.load gives a dict (keyed by config) or a list of entries
+  - for a dict, it reads list(d.values()), and every entry must have latency_stats
   - per-hardware latency = stats.get("compute_median_ms", stats.get("median"))
-  - entries carry resolution/patch_size/num_windows/dec_layers/num_queries
+  - entries carry resolution, patch_size, num_windows, dec_layers, num_queries
 
-The read pattern is vendored below; if rf-detr-internal changes it, update
-this test alongside.
+The read pattern is vendored below. If rf-detr-internal changes the pattern,
+update this test with it.
 """
 
 import importlib.util
