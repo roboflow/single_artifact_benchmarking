@@ -32,3 +32,9 @@ RUN pip install --no-cache-dir --no-deps .
 
 # This check fails the build if an install changed the serving stack.
 RUN python -c "import torch, tensorrt, onnxruntime, sab, sab.environment, sab.models.utils"
+
+# The serving base image starts the inference server by default. This image is
+# a benchmark harness, so reset the entrypoint and give the run command on the
+# docker run command line.
+ENTRYPOINT []
+CMD ["bash"]
