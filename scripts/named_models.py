@@ -1,27 +1,31 @@
 """Named trainable model registry for standardized latency benchmarking.
 
-The registry contains only models that users can train on the platform with
-roboflow-train: rfdetr, yolov8, yolov11, yolo26 (each with its seg variant
-where artifacts exist), and yololite.
+The registry contains the models that users can train on the platform with
+roboflow-train, in every trainable size:
+
+- rfdetr: nano, small, medium, large, xlarge, 2xlarge (base is legacy and
+  pico is not trainable, so both are excluded)
+- rfdetr-seg: nano, small, medium, large, xlarge, 2xlarge
+- yolov8 and yolov8-seg: n, s, m, l, x
+- yolov11 and yolov11-seg: n, s, m, l, x (keys use the artifact spelling
+  "yolo11*"; the platform id spelling is "yolov11*")
+- yolo26 and yolo26-seg: n, s, m, l, x
+- yololite (GPU family) and yololite-edge (CPU family): n, s, m, l, xl
 
 Every entry benchmarks a TensorRT FP16 engine at batch 1. This is the same
 protocol that the NAS timing tables use. As a result, named models and NAS
 children are directly comparable on a latency vs accuracy pareto chart.
 
-Known gaps:
-- rfdetr-seg: no benchmark ONNX artifacts are in the GCS bucket yet
-  (sab/models/benchmark_rfdetr_seg.py has classes but an empty artifact
-  list). Add entries here when the artifacts are uploaded.
-- yolo26-seg: only the nano artifact (yolo26n-seg.onnx) was exercised on the
-  yolo26_seg branch. Add the other sizes after a validation run.
-- yololite: there is no canonical ONNX in the bucket. The model needs a
-  decoded local file. Pass it with --yololite-onnx (or SAB_YOLOLITE_ONNX).
+Some entries name artifacts that are not in the GCS bucket yet. The runner
+checks availability before each run and reports the missing artifacts. Run
+`get_sab_latencies.py --list-missing` for the current gap list.
 """
 
 from dataclasses import dataclass
 from typing import Callable
 
 from sab.models.benchmark_rfdetr import RFDETRTRTInference
+from sab.models.benchmark_rfdetr_seg import RFDETRSegTRTInference
 from sab.models.benchmark_yolo26 import YOLO26TRTInference
 from sab.models.benchmark_yololite import YoloLiteTRTInference
 from sab.models.benchmark_yolov8 import YOLOv8TRTInference
@@ -37,23 +41,14 @@ class NamedModel:
     key: str
     family: str
     inference_class: type
-    onnx_artifact: str | None = None  # None: the model needs a local ONNX path
+    onnx_artifact: str
     needs_class_remapping: bool = False
     graph_surgery: Callable[[str], str] | None = None
     max_dets: int = 100
 
-    def to_request(
-        self,
-        buffer_time: float,
-        max_images: int | None,
-        is_jetson: bool,
-        local_onnx: str | None = None,
-    ) -> ArtifactBenchmarkRequest:
-        onnx_path = self.onnx_artifact or local_onnx
-        if onnx_path is None:
-            raise ValueError(f"{self.key} needs a local ONNX path")
+    def to_request(self, buffer_time: float, max_images: int | None, is_jetson: bool) -> ArtifactBenchmarkRequest:
         return ArtifactBenchmarkRequest(
-            onnx_path=onnx_path,
+            onnx_path=self.onnx_artifact,
             inference_class=self.inference_class,
             needs_class_remapping=self.needs_class_remapping,
             needs_fp16=True,
@@ -71,6 +66,7 @@ def _family(
     artifacts: dict[str, str],
     needs_class_remapping: bool = False,
     graph_surgery: Callable[[str], str] | None = None,
+    max_dets: int = 100,
 ) -> list[NamedModel]:
     return [
         NamedModel(
@@ -80,62 +76,49 @@ def _family(
             inference_class=inference_class,
             needs_class_remapping=needs_class_remapping,
             graph_surgery=graph_surgery,
+            max_dets=max_dets,
         )
         for key, artifact in artifacts.items()
     ]
 
 
+_RFDETR_SIZES = ["nano", "small", "medium", "large", "xlarge", "2xlarge"]
+_YOLO_SIZES = ["n", "s", "m", "l", "x"]
+_YOLOLITE_SIZES = ["n", "s", "m", "l", "xl"]
+
 _ALL_MODELS: list[NamedModel] = [
-        *_family("rfdetr", RFDETRTRTInference, {
-            "rfdetr-nano": "rf-detr-nano.onnx",
-            "rfdetr-small": "rf-detr-small.onnx",
-            "rfdetr-medium": "rf-detr-medium.onnx",
-        }),
-        *_family("yolov8", YOLOv8TRTInference, {
-            "yolov8n": "yolov8n_nms_conf_0.01.onnx",
-            "yolov8s": "yolov8s_nms_conf_0.01.onnx",
-            "yolov8m": "yolov8m_nms_conf_0.01.onnx",
-        }, needs_class_remapping=True),
-        *_family("yolov8-seg", YOLOv8SegTRTInference, {
-            "yolov8n-seg": "yolov8n_seg_nms_conf_0.01.onnx",
-            "yolov8s-seg": "yolov8s_seg_nms_conf_0.01.onnx",
-            "yolov8m-seg": "yolov8m_seg_nms_conf_0.01.onnx",
-            "yolov8l-seg": "yolov8l_seg_nms_conf_0.01.onnx",
-            "yolov8x-seg": "yolov8x_seg_nms_conf_0.01.onnx",
-        }, needs_class_remapping=True, graph_surgery=fuse_yolo_mask_postprocessing_into_onnx),
-        *_family("yolov11", YOLOv11TRTInference, {
-            "yolo11n": "yolo11n_nms_conf_0.01.onnx",
-            "yolo11s": "yolo11s_nms_conf_0.01.onnx",
-            "yolo11m": "yolo11m_nms_conf_0.01.onnx",
-            "yolo11l": "yolo11l_nms_conf_0.01.onnx",
-            "yolo11x": "yolo11x_nms_conf_0.01.onnx",
-        }, needs_class_remapping=True),
-        *_family("yolov11-seg", YOLOv11SegTRTInference, {
-            "yolo11n-seg": "yolo11n_seg_nms_conf_0.01.onnx",
-            "yolo11s-seg": "yolo11s_seg_nms_conf_0.01.onnx",
-            "yolo11m-seg": "yolo11m_seg_nms_conf_0.01.onnx",
-            "yolo11l-seg": "yolo11l_seg_nms_conf_0.01.onnx",
-            "yolo11x-seg": "yolo11x_seg_nms_conf_0.01.onnx",
-        }, needs_class_remapping=True, graph_surgery=fuse_yolo_mask_postprocessing_into_onnx),
-        *_family("yolo26", YOLO26TRTInference, {
-            "yolo26n": "yolo26n.onnx",
-            "yolo26s": "yolo26s.onnx",
-            "yolo26m": "yolo26m.onnx",
-            "yolo26l": "yolo26l.onnx",
-            "yolo26x": "yolo26x.onnx",
-        }, needs_class_remapping=True),
-        # yolo26-seg exports masks directly, so it uses the yolov11-seg adapter
-        # without graph surgery (see the yolo26_seg branch).
-        *_family("yolo26-seg", YOLOv11SegTRTInference, {
-            "yolo26n-seg": "yolo26n-seg.onnx",
-        }, needs_class_remapping=True),
-        NamedModel(
-            key="yololite",
-            family="yololite",
-            inference_class=YoloLiteTRTInference,
-            onnx_artifact=None,
-            max_dets=500,
-        ),
+    *_family("rfdetr", RFDETRTRTInference, {
+        f"rfdetr-{size}": f"rf-detr-{size}.onnx" for size in _RFDETR_SIZES
+    }),
+    *_family("rfdetr-seg", RFDETRSegTRTInference, {
+        f"rfdetr-seg-{size}": f"rf-detr-seg-{size}.onnx" for size in _RFDETR_SIZES
+    }),
+    *_family("yolov8", YOLOv8TRTInference, {
+        f"yolov8{size}": f"yolov8{size}_nms_conf_0.01.onnx" for size in _YOLO_SIZES
+    }, needs_class_remapping=True),
+    *_family("yolov8-seg", YOLOv8SegTRTInference, {
+        f"yolov8{size}-seg": f"yolov8{size}_seg_nms_conf_0.01.onnx" for size in _YOLO_SIZES
+    }, needs_class_remapping=True, graph_surgery=fuse_yolo_mask_postprocessing_into_onnx),
+    *_family("yolov11", YOLOv11TRTInference, {
+        f"yolo11{size}": f"yolo11{size}_nms_conf_0.01.onnx" for size in _YOLO_SIZES
+    }, needs_class_remapping=True),
+    *_family("yolov11-seg", YOLOv11SegTRTInference, {
+        f"yolo11{size}-seg": f"yolo11{size}_seg_nms_conf_0.01.onnx" for size in _YOLO_SIZES
+    }, needs_class_remapping=True, graph_surgery=fuse_yolo_mask_postprocessing_into_onnx),
+    *_family("yolo26", YOLO26TRTInference, {
+        f"yolo26{size}": f"yolo26{size}.onnx" for size in _YOLO_SIZES
+    }, needs_class_remapping=True),
+    # yolo26-seg exports masks directly, so it uses the yolov11-seg adapter
+    # without graph surgery (see the yolo26_seg branch).
+    *_family("yolo26-seg", YOLOv11SegTRTInference, {
+        f"yolo26{size}-seg": f"yolo26{size}-seg.onnx" for size in _YOLO_SIZES
+    }, needs_class_remapping=True),
+    *_family("yololite", YoloLiteTRTInference, {
+        f"yololite-{size}": f"yololite-{size}.onnx" for size in _YOLOLITE_SIZES
+    }, max_dets=500),
+    *_family("yololite-edge", YoloLiteTRTInference, {
+        f"yololite-edge-{size}": f"yololite-edge-{size}.onnx" for size in _YOLOLITE_SIZES
+    }, max_dets=500),
 ]
 
 assert len({m.key for m in _ALL_MODELS}) == len(_ALL_MODELS), "duplicate model keys"

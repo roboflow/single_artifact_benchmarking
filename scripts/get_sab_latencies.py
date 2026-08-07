@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import sys
+import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -27,6 +28,24 @@ from sab.models.utils import pretty_print_results, run_benchmark_on_artifact
 
 HARDWARE_LABELS = {"t4": "T4", "ai1": "AI1"}
 NAS_PREFIX = "nas/"
+ARTIFACT_URL_BASE = "https://storage.googleapis.com/single_artifact_benchmarking"
+
+
+def artifact_in_bucket(artifact: str) -> bool:
+    request = urllib.request.Request(f"{ARTIFACT_URL_BASE}/{artifact}", method="HEAD")
+    try:
+        with urllib.request.urlopen(request, timeout=10):  # noqa: S310 -- fixed https base
+            return True
+    except Exception:
+        return False
+
+
+def missing_artifacts() -> dict[str, str]:
+    return {
+        key: model.onnx_artifact
+        for key, model in NAMED_MODELS.items()
+        if not os.path.exists(model.onnx_artifact) and not artifact_in_bucket(model.onnx_artifact)
+    }
 
 
 def all_model_names() -> list[str]:
@@ -57,16 +76,20 @@ def parse_args(argv=None):
     parser.add_argument("--output-dir", default=env("SAB_OUTPUT_DIR", "/results"))
     parser.add_argument("--buffer-time", type=float, default=float(env("SAB_BUFFER_TIME", "0.2")))
     parser.add_argument("--max-images", type=int, default=int(env("SAB_MAX_IMAGES", "0")) or None)
-    parser.add_argument(
-        "--yololite-onnx",
-        default=env("SAB_YOLOLITE_ONNX") or None,
-        help="Path to a decoded yololite ONNX file. Without it, the yololite entry is skipped.",
-    )
     parser.add_argument("--list", action="store_true", help="Print all valid model names and exit.")
+    parser.add_argument(
+        "--list-missing",
+        action="store_true",
+        help="Print the model entries whose ONNX artifacts are not in the bucket, then exit.",
+    )
     args = parser.parse_args(argv)
 
     if args.list:
         print("\n".join(all_model_names()))
+        sys.exit(0)
+    if args.list_missing:
+        for key, artifact in sorted(missing_artifacts().items()):
+            print(f"{key}: {artifact}")
         sys.exit(0)
     if args.hardware is None:
         parser.error("--hardware is required (or set SAB_HARDWARE)")
@@ -85,7 +108,6 @@ def run_named_model(key: str, args, hardware: str) -> dict:
         buffer_time=args.buffer_time,
         max_images=args.max_images,
         is_jetson=hardware == "AI1",
-        local_onnx=args.yololite_onnx if key == "yololite" else None,
     )
     accuracy_stats, latency_stats, throttled = run_benchmark_on_artifact(
         request,
@@ -126,9 +148,12 @@ def main(argv=None):
         os.makedirs(named_dir, exist_ok=True)
         environment = collect_environment()
         results = []
+        skipped = []
         for key in named_selected:
-            if key == "yololite" and args.yololite_onnx is None:
-                print("Skipping yololite: no --yololite-onnx path given")
+            model = NAMED_MODELS[key]
+            if not os.path.exists(model.onnx_artifact) and not artifact_in_bucket(model.onnx_artifact):
+                print(f"Skipping {key}: {model.onnx_artifact} is not in the bucket")
+                skipped.append(key)
                 continue
             output_file = os.path.join(named_dir, f"{key}.json")
             if os.path.exists(output_file):
@@ -143,8 +168,10 @@ def main(argv=None):
 
         combined_file = os.path.join(named_dir, "combined.json")
         with open(combined_file, "w") as f:
-            json.dump({"environment": environment, "results": results}, f, indent=2)
+            json.dump({"environment": environment, "results": results, "skipped_missing_artifact": skipped}, f, indent=2)
         print(f"Wrote {combined_file}")
+        if skipped:
+            print(f"Skipped {len(skipped)} entries with missing artifacts: {', '.join(skipped)}")
         pretty_print_results(results)
 
 
