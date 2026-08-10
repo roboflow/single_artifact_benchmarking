@@ -56,4 +56,6 @@ Mounts:
   ```
 
   The NVML throttle monitor runs in both cases. It sets `"throttled": true` in the results for each run that throttled.
+
+  The buffer between passes is pinned at 0.2 s (`BUFFER_TIME_S` in `get_sab_latencies.py`). This matches the production NAS tables and the published RF-DETR protocol. Models above roughly 30 ms hit the 70 W power cap of the T4 inside a single pass. No buffer prevents that, and the flag marks those entries.
 - **AI1**: Jetson has no clock locking and no NVML throttle events. The monitor does nothing there (`is_jetson=True`). For stable numbers, set the power model and the maximum clocks on the host first: `sudo nvpmodel -m 0 && sudo jetson_clocks`.

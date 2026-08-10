@@ -30,6 +30,12 @@ HARDWARE_LABELS = {"t4": "T4", "ai1": "AI1"}
 NAS_PREFIX = "nas/"
 ARTIFACT_URL_BASE = "https://storage.googleapis.com/single_artifact_benchmarking"
 
+# Pinned methodology constant. The production NAS tables and the published
+# RF-DETR benchmarks use a 200 ms buffer between passes. All standard runs
+# use the same value, so new numbers stay comparable with the tables.
+# Entries that throttle in spite of the buffer keep "throttled": true.
+BUFFER_TIME_S = 0.2
+
 
 def artifact_in_bucket(artifact: str) -> bool:
     request = urllib.request.Request(f"{ARTIFACT_URL_BASE}/{artifact}", method="HEAD")
@@ -74,7 +80,6 @@ def parse_args(argv=None):
     )
     parser.add_argument("--coco-path", default=env("SAB_COCO_PATH", "/data"), help="COCO-format val dir with _annotations.coco.json")
     parser.add_argument("--output-dir", default=env("SAB_OUTPUT_DIR", "/results"))
-    parser.add_argument("--buffer-time", type=float, default=float(env("SAB_BUFFER_TIME", "0.2")))
     parser.add_argument("--max-images", type=int, default=int(env("SAB_MAX_IMAGES", "0")) or None)
     parser.add_argument("--list", action="store_true", help="Print all valid model names and exit.")
     parser.add_argument(
@@ -105,7 +110,7 @@ def parse_args(argv=None):
 def run_named_model(key: str, args, hardware: str) -> dict:
     model = NAMED_MODELS[key]
     request = model.to_request(
-        buffer_time=args.buffer_time,
+        buffer_time=BUFFER_TIME_S,
         max_images=args.max_images,
         is_jetson=hardware == "AI1",
     )
@@ -139,7 +144,7 @@ def main(argv=None):
             hardware=hardware,
             output_dir=os.path.join(args.output_dir, "nas"),
             coco_path=args.coco_path,
-            buffer_time=args.buffer_time,
+            buffer_time=BUFFER_TIME_S,
             max_images=args.max_images,
         )
 
