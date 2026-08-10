@@ -25,7 +25,6 @@ from named_models import NAMED_MODELS
 
 from sab.environment import collect_environment
 from sab.models.utils import pretty_print_results, run_benchmark_on_artifact
-from sab.retry import run_until_unthrottled
 
 HARDWARE_LABELS = {"t4": "T4", "ai1": "AI1"}
 NAS_PREFIX = "nas/"
@@ -110,8 +109,7 @@ def run_named_model(key: str, args, hardware: str) -> dict:
         max_images=args.max_images,
         is_jetson=hardware == "AI1",
     )
-    accuracy_stats, latency_stats, throttled = run_until_unthrottled(
-        run_benchmark_on_artifact,
+    accuracy_stats, latency_stats, throttled = run_benchmark_on_artifact(
         request,
         images_dir=args.coco_path,
         annotations_file_path=os.path.join(args.coco_path, "_annotations.coco.json"),
