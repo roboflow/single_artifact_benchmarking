@@ -11,6 +11,7 @@ import time
 from sab.environment import collect_environment
 from sab.models.benchmark_rfdetr import RFDETRTRTInference
 from sab.models.utils import ArtifactBenchmarkRequest, run_benchmark_on_artifact
+from sab.retry import run_until_unthrottled
 
 
 def main():
@@ -32,7 +33,8 @@ def main():
     )
 
     t0 = time.time()
-    score, latency_stats, throttled = run_benchmark_on_artifact(
+    score, latency_stats, throttled = run_until_unthrottled(
+        run_benchmark_on_artifact,
         request,
         images_dir=args.coco_path,
         annotations_file_path=os.path.join(args.coco_path, "_annotations.coco.json"),

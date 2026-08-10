@@ -136,6 +136,7 @@ def run_sweep(
     # without torch or tensorrt (tests, --list).
     from sab.models.benchmark_rfdetr import RFDETRTRTInference
     from sab.models.utils import ArtifactBenchmarkRequest, run_benchmark_on_artifact
+    from sab.retry import run_until_unthrottled
 
     paths = BACKBONE_PATHS[backbone]
     onnx_url_base = paths["onnx_url_base"]
@@ -193,8 +194,8 @@ def run_sweep(
             max_images=max_images,
             is_jetson=is_jetson,
         )
-        score, stats, throttled = run_benchmark_on_artifact(
-            request, images_dir=coco_path, annotations_file_path=annotation_file
+        score, stats, throttled = run_until_unthrottled(
+            run_benchmark_on_artifact, request, images_dir=coco_path, annotations_file_path=annotation_file
         )
         shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -210,6 +211,8 @@ def run_sweep(
             throttled=throttled,
             onnx_sha256=onnx_sha256,
         )
+        # Additive field: the buffer that produced the clean run, after escalation.
+        candidate_result["buffer_time_s"] = request.buffer_time
         results.append(candidate_result)
         print(candidate_result)
         print(f"Time taken to analyze candidate {config_id}: {time.time() - candidate_start:.1f} seconds")

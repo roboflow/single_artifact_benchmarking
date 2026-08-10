@@ -55,5 +55,5 @@ Mounts:
   sudo nvidia-smi -pm 1 && sudo nvidia-smi --lock-gpu-clocks "$(nvidia-smi --query-gpu=clocks.max.graphics --format=csv,noheader,nounits)"
   ```
 
-  The NVML throttle monitor runs in both cases. It sets `"throttled": true` in the results for each run that throttled.
+  The NVML throttle monitor runs in both cases. If a run throttles, the harness doubles the buffer time and reruns, up to 4 attempts (`sab/retry.py`). A result keeps `"throttled": true` only when every attempt throttled. The final buffer time lands in the results.
 - **AI1**: Jetson has no clock locking and no NVML throttle events. The monitor does nothing there (`is_jetson=True`). For stable numbers, set the power model and the maximum clocks on the host first: `sudo nvpmodel -m 0 && sudo jetson_clocks`.
