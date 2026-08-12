@@ -60,6 +60,14 @@ class ProfilerBase:
         """Clear all recorded timings."""
         self.timings.clear()
 
+    def discard_timings_since(self, sample_count: int):
+        """Drop every sample recorded after the series held `sample_count` entries.
+
+        Lets a caller keep a one-off call out of the timing series (a CUDA graph
+        capture, for example) without knowing whether that call recorded a sample.
+        """
+        del self.timings[sample_count:]
+
     def get_last_timing(self) -> float:
         """Get the most recent timing."""
         if not self.timings:
