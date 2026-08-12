@@ -61,7 +61,7 @@ def run_timed_pass(
     Returns:
         The profiler statistics for the pass.
     """
-    inference.profiler.discard_timings_since(0)
+    inference.profiler.reset()
     if max_images is not None:
         image_paths = image_paths[:max_images]
 

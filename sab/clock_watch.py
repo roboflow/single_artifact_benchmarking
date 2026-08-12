@@ -219,16 +219,33 @@ class ThrottleMonitor:
     #         enable_persistence(False)
     #         unlock_clocks()
     def __enter__(self):
+        # Load NVML before touching any hardware state: when __enter__ raises,
+        # __exit__ never runs, so nothing may fail after a side effect without
+        # a rollback.
+        _load_nvml()
         gpu_clock, mem_clock = get_max_clocks()
         enable_persistence(True)
-        lock_clocks(gpu_clock, mem_clock)
-        self.monitor_throttling(gpu_clock)
+        try:
+            lock_clocks(gpu_clock, mem_clock)
+            self.monitor_throttling(gpu_clock)
+        except BaseException:
+            self.stop()
+            enable_persistence(False)
+            unlock_clocks()
+            raise
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.stop()
-        enable_persistence(False)
-        unlock_clocks()
+        try:
+            self.stop()
+        finally:
+            enable_persistence(False)
+            unlock_clocks()
+        # The join in stop() is what makes a late worker failure visible, so
+        # surface it here - but never mask an exception already escaping the
+        # benchmark body.
+        if exc_type is None and self._error is not None:
+            raise RuntimeError(f"The throttle watcher failed during the pass: {self._error}") from self._error
 
 
 def get_max_clocks() -> tuple[int, int]:
