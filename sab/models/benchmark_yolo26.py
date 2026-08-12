@@ -30,7 +30,7 @@ class YOLO26ONNXInference(ONNXInferenceCUDA):
 
 class YOLO26TRTInference(TRTInference):
     def __init__(self, model_path, image_input_name=None):
-        super().__init__(model_path, image_input_name, use_cuda_graph=False)
+        super().__init__(model_path, image_input_name, use_cuda_graph=True)
 
     def preprocess(self, input_image):
         return preprocess_image(input_image, self.image_input_shape)
