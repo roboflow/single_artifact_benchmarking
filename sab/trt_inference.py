@@ -294,6 +294,16 @@ class TRTInference:
             # Copy input data to persistent tensor
             input_shape = self.copy_input_data(input_image)
 
+            # The first call for a shape captures the CUDA graph inside the profiled
+            # region: warm-up executions plus the capture itself. That sample measures
+            # capture, not replay, so it is dropped from the series after execution.
+            captures_graph = (
+                self.use_cuda_graph
+                and self.cuda_graph_compatible
+                and input_shape not in self.graph_cache
+            )
+            samples_before_execution = len(self.profiler.timings)
+
             if self.use_cuda_graph and self.cuda_graph_compatible:
                 # Use async profiling for CUDA graphs to avoid interference
                 with self.profiler.profile_async(stream=self.torch_stream):
@@ -317,7 +327,10 @@ class TRTInference:
                 # Use regular profiling for standard execution
                 with self.profiler.profile(stream=self.torch_stream):
                     self._execute_standard()
-        
+
+            if captures_graph:
+                self.profiler.discard_timings_since(samples_before_execution)
+
         torch.cuda.synchronize()
 
         # Get outputs
