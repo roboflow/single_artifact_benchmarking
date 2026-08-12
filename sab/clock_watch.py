@@ -24,6 +24,10 @@ NVML_TIMEOUT = 1000  # ms
 _nvml = None
 
 
+class NvmlUnavailableError(RuntimeError):
+    """NVML is not present or failed to load, so clocks cannot be watched."""
+
+
 def _load_nvml():
     """Load NVML on first use and cache it.
 
@@ -37,7 +41,11 @@ def _load_nvml():
 
     lib_path = ctypes.util.find_library("nvidia-ml")
     if not lib_path:
-        sys.exit("NVML library not found – is the NVIDIA driver installed?")
+        # A normal exception, never sys.exit(): the first load can happen on the
+        # monitor worker thread, and a SystemExit there dies silently — the
+        # monitor would then report "did not throttle" for a pass it never
+        # watched.
+        raise NvmlUnavailableError("NVML library not found - is the NVIDIA driver installed?")
     lib = ct.CDLL(lib_path)
 
     for name in (
@@ -142,26 +150,26 @@ class ThrottleMonitor:
         self._target_freq = target_freq
         self._stop_thread = False
         self._thread = None
+        self._error = None
     
     def _check_for_throttling(self):
-        # Get the generator
-        clock_generator = emit_clock_changes()
-        
-        while not self._stop_thread:
-            try:
-                # Get the next clock reading (this will timeout every 5 seconds)
-                sm, mem, reason_txt, reason_mask = next(clock_generator)
+        try:
+            clock_generator = emit_clock_changes()
+
+            while not self._stop_thread:
+                try:
+                    # Get the next clock reading (this will timeout every 5 seconds)
+                    sm, mem, reason_txt, reason_mask = next(clock_generator)
+                except StopIteration:
+                    break
 
                 if sm != self._target_freq and is_throttled(reason_mask):
                     self._throttle_detected = True
                     print(f"🔴  GPU throttled: {reason_txt}, SM={sm} MHz, MEM={mem} MHz")
                     break
-                    
-            except StopIteration:
-                break
-            except Exception as e:
-                print(f"Error monitoring clocks: {e}")
-                break
+        except BaseException as e:  # a dead watcher must never read as a clean verdict
+            self._error = e
+            print(f"Error monitoring clocks: {e}")
     
     def monitor_throttling(self, target_freq: int|None=None):
         if target_freq is None and self._target_freq is None:
@@ -172,13 +180,24 @@ class ThrottleMonitor:
         
         if self._thread is not None:
             return  # Already monitoring
-            
+
+        # Load NVML on the caller's thread, so a missing library fails the run
+        # here instead of killing the worker silently.
+        _load_nvml()
+
         self._stop_thread = False
         self._thread = threading.Thread(target=self._check_for_throttling)
         self._thread.daemon = True
         self._thread.start()
     
     def did_throttle(self) -> bool:
+        """True when the pass throttled. Raises when the watcher itself failed.
+
+        The verdict is tri-state in effect: clean, throttled, or failed. A
+        watcher that died must never certify a pass as clean.
+        """
+        if self._error is not None:
+            raise RuntimeError(f"The throttle watcher failed mid-pass: {self._error}") from self._error
         return self._throttle_detected
 
     def stop(self):
