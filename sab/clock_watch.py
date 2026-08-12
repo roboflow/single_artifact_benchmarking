@@ -186,9 +186,12 @@ class ThrottleMonitor:
         _load_nvml()
 
         self._stop_thread = False
-        self._thread = threading.Thread(target=self._check_for_throttling)
-        self._thread.daemon = True
-        self._thread.start()
+        # Assign only after start() succeeds: stop() joins every non-None
+        # thread, and joining a never-started thread raises.
+        worker = threading.Thread(target=self._check_for_throttling)
+        worker.daemon = True
+        worker.start()
+        self._thread = worker
     
     def did_throttle(self) -> bool:
         """True when the pass throttled. Raises when the watcher itself failed.
@@ -229,9 +232,11 @@ class ThrottleMonitor:
             lock_clocks(gpu_clock, mem_clock)
             self.monitor_throttling(gpu_clock)
         except BaseException:
-            self.stop()
-            enable_persistence(False)
-            unlock_clocks()
+            try:
+                self.stop()
+            finally:
+                enable_persistence(False)
+                unlock_clocks()
             raise
         return self
     
