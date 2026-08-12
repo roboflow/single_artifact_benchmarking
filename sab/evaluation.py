@@ -40,8 +40,14 @@ def run_timed_pass(
     This is the timed path and nothing else: no annotations, no COCO, no mAP. Every
     image goes through open, to_tensor, transfer, infer, then the buffer sleep.
 
+    The pass owns the profiler: it clears any earlier samples at entry, so the
+    returned statistics describe this pass alone. Read raw samples off
+    `inference.profiler.timings` after the call if you need the series.
+
     Args:
-        inference: an inference object exposing .prediction_type, .infer() and .profiler
+        inference: one of SAB's inference classes (TRTInference, ONNXInferenceCUDA,
+            or ONNXInferenceCPU subclasses). Input device placement keys on the
+            concrete class: everything except ONNXInferenceCPU gets .cuda() inputs.
         image_paths: images to run, in order
         buffer_time: seconds to sleep after each image, to let the GPU cool
         max_images: run only the first N images
@@ -55,6 +61,7 @@ def run_timed_pass(
     Returns:
         The profiler statistics for the pass.
     """
+    inference.profiler.discard_timings_since(0)
     if max_images is not None:
         image_paths = image_paths[:max_images]
 
