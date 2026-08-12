@@ -10,6 +10,8 @@ import datetime
 import signal
 import sys
 import threading
+from functools import reduce
+from operator import or_
 from subprocess import run
 from contextlib import contextmanager
 
@@ -19,20 +21,37 @@ NVML_TIMEOUT = 1000  # ms
 # ──────────────────────────────────────────────────────────────────────────────
 # 1.  Load NVML and declare the handful of functions we need
 # ──────────────────────────────────────────────────────────────────────────────
-lib_path = ctypes.util.find_library("nvidia-ml")
-if not lib_path:
-    sys.exit("NVML library not found – is the NVIDIA driver installed?")
-nvml = ct.CDLL(lib_path)
+_nvml = None
 
-for name in (
-    "nvmlInit_v2", "nvmlShutdown",
-    "nvmlDeviceGetHandleByIndex_v2",
-    "nvmlEventSetCreate", "nvmlEventSetFree",
-    "nvmlDeviceRegisterEvents", "nvmlEventSetWait",
-    "nvmlDeviceGetCurrentClocksThrottleReasons",
-    "nvmlDeviceGetClockInfo",
-):
-    getattr(nvml, name).restype = ct.c_int  # all return nvmlReturn_t
+
+def _load_nvml():
+    """Load NVML on first use and cache it.
+
+    Loading at import time makes every transitive import of this module fail on a
+    machine without libnvidia-ml, so the dlopen waits until a caller needs NVML.
+    """
+    global _nvml
+
+    if _nvml is not None:
+        return _nvml
+
+    lib_path = ctypes.util.find_library("nvidia-ml")
+    if not lib_path:
+        sys.exit("NVML library not found – is the NVIDIA driver installed?")
+    lib = ct.CDLL(lib_path)
+
+    for name in (
+        "nvmlInit_v2", "nvmlShutdown",
+        "nvmlDeviceGetHandleByIndex_v2",
+        "nvmlEventSetCreate", "nvmlEventSetFree",
+        "nvmlDeviceRegisterEvents", "nvmlEventSetWait",
+        "nvmlDeviceGetCurrentClocksThrottleReasons",
+        "nvmlDeviceGetClockInfo",
+    ):
+        getattr(lib, name).restype = ct.c_int  # all return nvmlReturn_t
+
+    _nvml = lib
+    return _nvml
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 2.  NVML constants we need (from the public headers)
@@ -42,17 +61,36 @@ NVML_EVENT_TYPE_CLOCK       = 0x10                         # any clock change  [
 NVML_CLOCK_GRAPHICS         = 0                            # SM core clock domain
 NVML_CLOCK_MEM              = 1                            # Memory clock domain
 
-# Throttle-reason bitmask – report them all
+# Clock-event ("throttle") reason bitmask – report them all. Each label is checked
+# against the nvml.h macro named beside it.
+# The KEYS of this map are the throttle decision: is_throttled() reports any bit in
+# here as throttling. Do not add or remove keys without a benchmark re-baseline.
+# nvmlClocksEventReasonDisplayClockSetting (0x0100) is left out on purpose, so a
+# display clock change stays benign, as it has always been here.
 REASONS = {
-    0x00000001: "GPU idle",
-    0x00000002: "Thermal",
-    0x00000004: "SW power-cap",
-    0x00000008: "HW slowdown",
-    0x00000010: "Sync-boost",
-    0x00000020: "SW thermal slowdown",
-    0x00000040: "HW thermal slowdown",
-    0x00000080: "HW power-brake",
+    0x00000001: "GPU idle",                    # nvmlClocksEventReasonGpuIdle
+    0x00000002: "Applications clocks setting",  # nvmlClocksEventReasonApplicationsClocksSetting
+    0x00000004: "SW power-cap",                # nvmlClocksEventReasonSwPowerCap
+    0x00000008: "HW slowdown",                 # nvmlClocksThrottleReasonHwSlowdown
+    0x00000010: "Sync-boost",                  # nvmlClocksEventReasonSyncBoost
+    0x00000020: "SW thermal slowdown",         # nvmlClocksEventReasonSwThermalSlowdown
+    0x00000040: "HW thermal slowdown",         # nvmlClocksThrottleReasonHwThermalSlowdown
+    0x00000080: "HW power-brake",              # nvmlClocksThrottleReasonHwPowerBrakeSlowdown
 }                                                # constants list  [oai_citation:1‡docs.nvidia.com](https://docs.nvidia.com/deploy/nvml-api/group__nvmlClocksThrottleReasons.html?utm_source=chatgpt.com)
+
+NO_THROTTLE_TEXT = "No throttle (max clocks)"
+
+# Every bit this module decodes, as one mask.
+THROTTLE_REASON_BITS = reduce(or_, REASONS)
+
+
+def is_throttled(reason_mask: int) -> bool:
+    """Report whether NVML gave any reason this module counts as throttling.
+
+    The decision is on the BITS, never on the label text, so a label correction
+    cannot change which runs are marked throttled.
+    """
+    return bool(reason_mask & THROTTLE_REASON_BITS)
 
 class Event(ct.Structure):        # minimal nvmlEventData_t
     _fields_ = [("device", ct.c_void_p),
@@ -62,10 +100,12 @@ class Event(ct.Structure):        # minimal nvmlEventData_t
 
 def chk(ret, func):
     if ret != NVML_SUCCESS:
-        nvml.nvmlShutdown()
+        _load_nvml().nvmlShutdown()
         sys.exit(f"{func} failed with code {ret}")
 
 def emit_clock_changes():
+    nvml = _load_nvml()
+
     chk(nvml.nvmlInit_v2(), "nvmlInit")
 
     dev = ct.c_void_p()
@@ -92,9 +132,9 @@ def emit_clock_changes():
         mask = ct.c_ulonglong()
         nvml.nvmlDeviceGetCurrentClocksThrottleReasons(dev, ct.byref(mask))
         reasons = [name for bit, name in REASONS.items() if mask.value & bit]
-        reason_txt = ", ".join(reasons) or "No throttle (max clocks)"
+        reason_txt = ", ".join(reasons) or NO_THROTTLE_TEXT
 
-        yield sm.value, mem.value, reason_txt
+        yield sm.value, mem.value, reason_txt, mask.value
 
 class ThrottleMonitor:
     def __init__(self, target_freq: int|None=None):
@@ -110,9 +150,9 @@ class ThrottleMonitor:
         while not self._stop_thread:
             try:
                 # Get the next clock reading (this will timeout every 5 seconds)
-                sm, mem, reason_txt = next(clock_generator)
-                
-                if sm != self._target_freq and reason_txt != "No throttle (max clocks)":
+                sm, mem, reason_txt, reason_mask = next(clock_generator)
+
+                if sm != self._target_freq and is_throttled(reason_mask):
                     self._throttle_detected = True
                     print(f"🔴  GPU throttled: {reason_txt}, SM={sm} MHz, MEM={mem} MHz")
                     break
@@ -253,7 +293,7 @@ class CPUFrequencyMonitor:
 def main():
     signal.signal(signal.SIGINT, lambda *_: sys.exit(0))   # clean Ctrl-C
     print("🟢  Watching for any GPU clock changes (press Ctrl-C to quit)")
-    for sm, mem, reason_txt in emit_clock_changes():
+    for sm, mem, reason_txt, _reason_mask in emit_clock_changes():
         print(f"{datetime.datetime.now():%H:%M:%S}  "
               f"SM={sm} MHz  MEM={mem} MHz  |  {reason_txt}")
 
