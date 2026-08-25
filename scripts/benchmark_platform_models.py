@@ -31,6 +31,7 @@ import fire
 
 from sab.environment import collect_environment
 from sab.models.benchmark_rfdetr import RFDETRTRTInference
+from sab.models.benchmark_rfdetr_seg import RFDETRSegTRTInference
 from sab.models.benchmark_yolo26 import YOLO26TRTInference
 from sab.models.benchmark_yolo26_seg import YOLO26SegTRTInference
 from sab.models.benchmark_yolov8 import YOLOv8TRTInference
@@ -94,18 +95,16 @@ RFDETR_MODELS = [
 
 # --- RF-DETR segmentation ----------------------------------------------------
 #
-# The bucket holds no named seg export. rf-detr-seg-nano-finetune.onnx and
-# rf-detr-seg-xxlarge.onnx are there, but neither is the platform's named
-# artifact for its size. Uncomment a line when its export lands, and take the
-# inference class from sab.models.benchmark_rfdetr_seg (RFDETRSegTRTInference,
-# CUDA-graph replay, prediction_type="segm").
+# Exports of the pretrained gs://rfdetr checkpoints through the platform export
+# path (rf-detr-internal@31743fa, class-default resolutions). The bucket also
+# holds rf-detr-seg-nano-finetune.onnx, which is NOT the named artifact.
 RFDETR_SEG_MODELS: list[PlatformModel] = [
-    # PlatformModel("rfdetr-seg-nano", "rf-detr-seg-nano.onnx", RFDETRSegTRTInference),
-    # PlatformModel("rfdetr-seg-small", "rf-detr-seg-small.onnx", RFDETRSegTRTInference),
-    # PlatformModel("rfdetr-seg-medium", "rf-detr-seg-medium.onnx", RFDETRSegTRTInference),
-    # PlatformModel("rfdetr-seg-large", "rf-detr-seg-large.onnx", RFDETRSegTRTInference),
-    # PlatformModel("rfdetr-seg-xlarge", "rf-detr-seg-xlarge.onnx", RFDETRSegTRTInference),
-    # PlatformModel("rfdetr-seg-2xlarge", "rf-detr-seg-2xlarge.onnx", RFDETRSegTRTInference),
+    PlatformModel("rfdetr-seg-nano", "rf-detr-seg-nano.onnx", RFDETRSegTRTInference),
+    PlatformModel("rfdetr-seg-small", "rf-detr-seg-small.onnx", RFDETRSegTRTInference),
+    PlatformModel("rfdetr-seg-medium", "rf-detr-seg-medium.onnx", RFDETRSegTRTInference),
+    PlatformModel("rfdetr-seg-large", "rf-detr-seg-large.onnx", RFDETRSegTRTInference),
+    PlatformModel("rfdetr-seg-xlarge", "rf-detr-seg-xlarge.onnx", RFDETRSegTRTInference),
+    PlatformModel("rfdetr-seg-2xlarge", "rf-detr-seg-xxlarge.onnx", RFDETRSegTRTInference),
 ]
 
 # --- YOLOv8 (fused NMS in the graph, no CUDA graph, COCO class remapping) ----
@@ -135,7 +134,6 @@ YOLOV11_MODELS = [
     for size in ("n", "s", "m", "l", "x")
 ]
 
-# The bucket holds seg exports for n, s, and m only.
 YOLOV11_SEG_MODELS = [
     PlatformModel(
         f"yolov11{size}-seg",
@@ -144,9 +142,7 @@ YOLOV11_SEG_MODELS = [
         needs_class_remapping=True,
         graph_surgery=fuse_yolo_mask_postprocessing_into_onnx,
     )
-    for size in ("n", "s", "m")
-    # yolo11l_seg_nms_conf_0.01.onnx and yolo11x_seg_nms_conf_0.01.onnx are not
-    # in the bucket. Add "l" and "x" above when they are exported.
+    for size in ("n", "s", "m", "l", "x")
 ]
 
 # --- YOLO26 (CUDA-graph replay, COCO class remapping) ------------------------
@@ -162,11 +158,9 @@ YOLO26_MODELS = [
 # yolov8/yolov11 seg rows above, whose fused-NMS exports need the mask
 # postprocessing folded into the graph first.
 #
-# The yolo26{n,s,m,l,x}-seg.onnx exports are being generated now and land in
-# gs://single_artifact_benchmarking shortly. These rows are enabled ahead of
-# that. Note that this script has no artifact preflight: the HEAD check lives in
-# benchmark_platform_nas_models.missing_artifacts, and a run started before the
-# exports land downloads a 404 XML page and fails inside the TensorRT parser.
+# Note that this script has no artifact preflight: the HEAD check lives in
+# benchmark_platform_nas_models.missing_artifacts, and a run against a missing
+# artifact downloads a 404 XML page and fails inside the TensorRT parser.
 YOLO26_SEG_MODELS = [
     PlatformModel(f"yolo26{size}-seg", f"yolo26{size}-seg.onnx", YOLO26SegTRTInference, needs_class_remapping=True)
     for size in ("n", "s", "m", "l", "x")

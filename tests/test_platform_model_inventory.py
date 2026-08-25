@@ -57,7 +57,11 @@ def test_rfdetr_2xlarge_uses_the_xxlarge_artifact():
         {f"yolov11{size}" for size in "nsmlx"},
         {f"yolo26{size}" for size in "nsmlx"},
         {f"yolo26{size}-seg" for size in "nsmlx"},
-        {f"yolov11{size}-seg" for size in "nsm"},
+        {f"yolov11{size}-seg" for size in "nsmlx"},
+        {
+            f"rfdetr-seg-{size}"
+            for size in ("nano", "small", "medium", "large", "xlarge", "2xlarge")
+        },
     ],
 )
 def test_families_are_complete(expected):
@@ -67,12 +71,8 @@ def test_families_are_complete(expected):
 @pytest.mark.parametrize(
     "absent",
     [
-        # The bucket holds no named rfdetr-seg export.
-        "rfdetr-seg-nano",
-        "rfdetr-seg-2xlarge",
-        # yolo11 seg stops at m.
-        "yolov11l-seg",
-        "yolov11x-seg",
+        # rf-detr-seg-nano-finetune.onnx is in the bucket but is not a named model.
+        "rfdetr-seg-nano-finetune",
     ],
 )
 def test_rows_without_an_artifact_are_not_run(absent):
