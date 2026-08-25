@@ -1,0 +1,9 @@
+# Dependencies that SAB needs and the pinned serving images do not contain.
+# pip installs them with --no-deps. No entry here can add or upgrade torch,
+# tensorrt, onnxruntime, numpy, or any other part of the serving stack.
+# The list is curated per base image. The import check in each Dockerfile
+# finds drift at build time.
+fire==0.7.0
+termcolor==2.4.0  # dependency of fire, not carried by --no-deps
+faster-coco-eval==1.6.7
+tqdm==4.67.1

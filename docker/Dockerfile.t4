@@ -1,0 +1,45 @@
+# SAB benchmarking image for NVIDIA T4 (hosted GPU inference deployment context).
+#
+# The base is the canonical GPU serving image. It holds the TensorRT, CUDA, and
+# torch stack that customers deploy to. Latency numbers only compare inside one
+# base pin, so the pin is by digest. A tag moves and a digest does not.
+#
+# The digest below is roboflow/roboflow-inference-server-gpu:1.4.1, read from
+# Docker Hub on 2026-08-24 (the same release and digest that
+# model-latency-benchmarking docker/Dockerfile.t4 measures). Change the pin in
+# its own commit. Do not use :latest.
+ARG BASE_IMAGE=roboflow/roboflow-inference-server-gpu:1.4.1@sha256:852a3c91cace7eae890fedf0eff1d5363d99ab6edb1dc025dba8a30525412875
+FROM ${BASE_IMAGE}
+
+ARG BASE_IMAGE
+ARG SAB_GIT_SHA=unknown
+
+LABEL org.opencontainers.image.source="https://github.com/roboflow/single_artifact_benchmarking" \
+      org.opencontainers.image.revision="${SAB_GIT_SHA}" \
+      com.roboflow.sab.hardware="T4" \
+      com.roboflow.sab.base_image="${BASE_IMAGE}"
+
+# sab.environment.collect_environment() reads these values at runtime.
+ENV SAB_BASE_IMAGE="${BASE_IMAGE}" \
+    SAB_GIT_SHA="${SAB_GIT_SHA}" \
+    SAB_HARDWARE="T4" \
+    SAB_CACHE_DIR=/cache
+
+WORKDIR /sab
+
+# Every pip install must use --no-deps. SAB's requirements.txt pins tensorrt and
+# torch, and those pins must not override the serving image's stack.
+COPY docker/requirements-lite.txt /sab/docker/requirements-lite.txt
+RUN pip install --no-cache-dir --no-deps -r docker/requirements-lite.txt
+
+COPY . /sab
+RUN pip install --no-cache-dir --no-deps .
+
+# This check fails the build if an install changed the serving stack.
+RUN python -c "import torch, tensorrt, onnxruntime, sab, sab.environment, sab.models.utils, sab.models.benchmark_rfdetr, sab.models.benchmark_yolov11_seg"
+
+# The serving base image starts the inference server by default. This image is
+# a benchmark harness, so reset the entrypoint and give the run command on the
+# docker run command line.
+ENTRYPOINT []
+CMD ["bash"]
