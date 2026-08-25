@@ -27,13 +27,21 @@ ENV SAB_BASE_IMAGE="${BASE_IMAGE}" \
 
 WORKDIR /sab
 
+# The 1.4.1 serving bases ship no pip (the gpu base uninstalls it in its
+# builder; the jetson base drops the console scripts). Bootstrap it once;
+# every later install still uses --no-deps so the serving stack stays intact.
+RUN python3 -m pip --version >/dev/null 2>&1 || ( \
+    python3 -c "import urllib.request; urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', '/tmp/get-pip.py')" && \
+    python3 /tmp/get-pip.py --break-system-packages --no-warn-script-location && \
+    rm /tmp/get-pip.py )
+
 # Every pip install must use --no-deps. SAB's requirements.txt pins tensorrt and
 # torch, and those pins must not override the serving image's stack.
 COPY docker/requirements-lite.txt /sab/docker/requirements-lite.txt
-RUN pip install --no-cache-dir --no-deps -r docker/requirements-lite.txt
+RUN python3 -m pip install --no-cache-dir --no-deps -r docker/requirements-lite.txt
 
 COPY . /sab
-RUN pip install --no-cache-dir --no-deps .
+RUN python3 -m pip install --no-cache-dir --no-deps .
 
 # This check fails the build if an install changed the serving stack.
 RUN python -c "import torch, tensorrt, onnxruntime, sab, sab.environment, sab.models.utils, sab.models.benchmark_rfdetr, sab.models.benchmark_yolov11_seg"
