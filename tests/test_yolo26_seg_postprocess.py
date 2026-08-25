@@ -94,15 +94,14 @@ def test_an_empty_detection_set_returns_empty_tensors():
     assert masks.shape == (0, ORIG_H, ORIG_W)
 
 
-def test_a_channels_first_output0_is_transposed_back():
-    # Some exports emit (1, 38, 300) instead of (1, 300, 38).
+def test_a_channels_first_output0_is_rejected():
+    # The bucket exports are (1, 300, 38). A transposed tensor is a wrong
+    # artifact, and the adapter refuses it instead of adapting.
     outputs = outputs_for(detection(100, 180, 300, 380, 0.9, 3))
     outputs["output0"] = outputs["output0"].transpose(1, 2).contiguous()
 
-    boxes, labels, _, _ = postprocess_output(outputs, METADATA)
-
-    assert labels.tolist() == [3]
-    assert torch.allclose(boxes[0], torch.tensor([100 / 640, 100 / 480, 300 / 640, 300 / 480]))
+    with pytest.raises(ValueError, match="output0"):
+        postprocess_output(outputs, METADATA)
 
 
 def test_the_trt_class_replays_a_cuda_graph_like_every_other_yolo26_row(monkeypatch):
