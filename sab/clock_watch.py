@@ -255,6 +255,20 @@ class ThrottleMonitor:
             raise RuntimeError(f"The throttle watcher failed during the pass: {self._error}") from self._error
 
 
+def open_throttle_monitor(target_freq: int|None = None):
+    """The throttle watch that can read this box.
+
+    A Jetson has no NVML, so ThrottleMonitor answers nothing there. The tegra
+    watch reads the GPU devfreq node and the thermal trips instead. Both give
+    the same verdict shape, so the caller does not branch.
+    """
+    from sab.tegra_clock_watch import TegraClockWatch, is_tegra
+
+    if is_tegra():
+        return TegraClockWatch()
+    return ThrottleMonitor(target_freq)
+
+
 def _nvidia_smi(*args: str, capture_output: bool = False):
     # Clock locking needs root. Containers run as root and have no sudo.
     # Bare-metal dev boxes are not root and need it.
