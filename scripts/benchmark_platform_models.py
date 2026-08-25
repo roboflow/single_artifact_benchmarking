@@ -12,7 +12,8 @@ two differ often: the platform key is `rfdetr-large` and the artifact is
 Every entry below states its artifact. Entries whose artifact is not in
 gs://single_artifact_benchmarking are commented out with the reason, so the
 gap is visible here instead of in a failed run. The inventory was read on
-2026-08-25.
+2026-08-25. The one exception is yolo26*-seg: those rows are enabled ahead of
+their exports, which land in the bucket shortly.
 
 Example:
     python scripts/benchmark_platform_models.py \\
@@ -31,6 +32,7 @@ import fire
 from sab.environment import collect_environment
 from sab.models.benchmark_rfdetr import RFDETRTRTInference
 from sab.models.benchmark_yolo26 import YOLO26TRTInference
+from sab.models.benchmark_yolo26_seg import YOLO26SegTRTInference
 from sab.models.benchmark_yolov8 import YOLOv8TRTInference
 from sab.models.benchmark_yolov8_seg import YOLOv8SegTRTInference
 from sab.models.benchmark_yolov11 import YOLOv11TRTInference
@@ -153,13 +155,22 @@ YOLO26_MODELS = [
     for size in ("n", "s", "m", "l", "x")
 ]
 
-# The bucket holds no yolo26 seg export, and SAB carries no yolo26 seg adapter
-# yet (it lives on the yolo26_seg branch). Both must land before these run:
-# YOLO26_SEG_MODELS = [
-#     PlatformModel(f"yolo26{size}-seg", f"yolo26{size}-seg.onnx", YOLO26SegTRTInference, needs_class_remapping=True)
-#     for size in ("n", "s", "m", "l", "x")
-# ]
-YOLO26_SEG_MODELS: list[PlatformModel] = []
+# --- YOLO26 segmentation (CUDA-graph replay, COCO class remapping) -----------
+#
+# No graph surgery: YOLO26 is NMS-free, so the plain ultralytics seg export runs
+# as it is, and the mask matmul happens in torch after inference. Contrast the
+# yolov8/yolov11 seg rows above, whose fused-NMS exports need the mask
+# postprocessing folded into the graph first.
+#
+# The yolo26{n,s,m,l,x}-seg.onnx exports are being generated now and land in
+# gs://single_artifact_benchmarking shortly. These rows are enabled ahead of
+# that. Note that this script has no artifact preflight: the HEAD check lives in
+# benchmark_platform_nas_models.missing_artifacts, and a run started before the
+# exports land downloads a 404 XML page and fails inside the TensorRT parser.
+YOLO26_SEG_MODELS = [
+    PlatformModel(f"yolo26{size}-seg", f"yolo26{size}-seg.onnx", YOLO26SegTRTInference, needs_class_remapping=True)
+    for size in ("n", "s", "m", "l", "x")
+]
 
 PLATFORM_MODELS: list[PlatformModel] = [
     *RFDETR_MODELS,
