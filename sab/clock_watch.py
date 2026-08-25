@@ -7,6 +7,8 @@ Tested on Tesla T4 / driver R555, but works on any dGPU that supports NVML event
 import ctypes as ct
 import ctypes.util
 import datetime
+import os
+import shutil
 import signal
 import sys
 import threading
@@ -253,9 +255,18 @@ class ThrottleMonitor:
             raise RuntimeError(f"The throttle watcher failed during the pass: {self._error}") from self._error
 
 
+def _nvidia_smi(*args: str, capture_output: bool = False):
+    # Clock locking needs root. Containers run as root and have no sudo.
+    # Bare-metal dev boxes are not root and need it.
+    command = ["nvidia-smi", *args]
+    if os.geteuid() != 0 and shutil.which("sudo"):
+        command = ["sudo", *command]
+    return run(command, capture_output=capture_output)
+
+
 def get_max_clocks() -> tuple[int, int]:
     """Get the maximum GPU and memory clocks."""
-    res = run(["sudo", "nvidia-smi", "--query-gpu=clocks.max.graphics,clocks.max.memory", "--format=csv,noheader"], capture_output=True)
+    res = _nvidia_smi("--query-gpu=clocks.max.graphics,clocks.max.memory", "--format=csv,noheader", capture_output=True)
     output = res.stdout.decode("utf-8").splitlines()[0].strip()
     # Parse comma-separated values and remove "MHz" suffix
     gpu_clock_str, mem_clock_str = output.split(',')
@@ -266,19 +277,19 @@ def get_max_clocks() -> tuple[int, int]:
 
 def lock_clocks(gpu_mhz: int, mem_mhz: int|None = None) -> None:
     """Lock GPU and memory clocks (requires root)."""
-    run(["sudo", "nvidia-smi", "--lock-gpu-clocks", str(gpu_mhz)])
+    _nvidia_smi("--lock-gpu-clocks", str(gpu_mhz))
     if mem_mhz:
-        run(["sudo", "nvidia-smi", "--lock-memory-clocks", str(mem_mhz)])
+        _nvidia_smi("--lock-memory-clocks", str(mem_mhz))
 
 
 def unlock_clocks() -> None:
     """Reset GPU and memory clocks (requires root)."""
-    run(["sudo", "nvidia-smi", "--reset-gpu-clocks"])
-    run(["sudo", "nvidia-smi", "--reset-memory-clocks"])
+    _nvidia_smi("--reset-gpu-clocks")
+    _nvidia_smi("--reset-memory-clocks")
 
 
 def enable_persistence(enable: bool) -> None:
-    run(["sudo", "nvidia-smi", "-pm", "1" if enable else "0"])
+    _nvidia_smi("-pm", "1" if enable else "0")
 
 
 class CPUFrequencyMonitor:
