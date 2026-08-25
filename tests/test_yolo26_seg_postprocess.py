@@ -1,120 +1,83 @@
-"""The YOLO26 seg adapter: what it reads off a plain export, and what it returns.
+"""The YOLO26 seg adapter: fused mask surgery plus the shared YOLOv11 seg path.
 
-YOLO26 is NMS-free, so nothing is folded into the graph. The mask matmul, the
-letterbox undo, and the box crop all happen here, on the outputs of the plain
-ultralytics export.
+The adapter reuses `benchmark_yolov11_seg`'s preprocess and postprocess, exactly
+as the OD path reuses `benchmark_yolov11`'s. The mask matmul, sigmoid, and box
+crop run inside the graph via `fuse_yolo_mask_postprocessing_into_onnx` — the
+same surgery, and the same timed region, as the yolov8/yolov11 seg rows behind
+the published numbers.
 """
 
-import pytest
+import numpy as np
+import onnx
 import torch
+from onnx import TensorProto, helper, numpy_helper
 
-from sab.models.benchmark_yolo26_seg import (
-    YOLO26SegTRTInference,
-    postprocess_output,
-)
+from sab.models import benchmark_yolo26_seg as y26seg
+from sab.models import benchmark_yolov11_seg as y11seg
+from sab.models.graph_surgery import fuse_yolo_mask_postprocessing_into_onnx
 from sab.trt_inference import TRTInference
 
 NUM_COEFFS = 32
 PROTO_SIZE = 160
 
-# A 640x480 source image, letterboxed into a 640x640 input: 80 rows of padding
-# top and bottom, none left or right.
-ORIG_H, ORIG_W = 480, 640
-METADATA = {
-    "original_shape": (1, 3, ORIG_H, ORIG_W),
-    "image_input_shape": (1, 3, 640, 640),
-    "scale": 1.0,
-    "padding": (0, 80, 0, 80),
-}
+
+def test_the_adapter_reuses_the_yolov11_seg_path():
+    assert y26seg.postprocess_output is y11seg.postprocess_output
+    assert y26seg.preprocess_image is y11seg.preprocess_image
 
 
-def detection(x1, y1, x2, y2, score, class_id):
-    """One (38,) row: xyxy in input-image pixels, score, class, then mask coeffs."""
-    row = torch.zeros(6 + NUM_COEFFS)
-    row[:6] = torch.tensor([x1, y1, x2, y2, score, class_id])
-    # Uniform coefficients against all-ones prototypes give a mask of 1.0
-    # everywhere, so the only thing left shaping it is the box crop.
-    row[6:] = 1.0 / NUM_COEFFS
-    return row
+def test_the_module_rows_fold_the_mask_surgery_into_the_graph():
+    import unittest.mock as mock
 
+    captured = []
+    with mock.patch.object(y26seg, "run_benchmark_on_artifacts", side_effect=lambda reqs, *a: captured.extend(reqs) or []):
+        with mock.patch.object(y26seg, "pretty_print_results"):
+            y26seg.main("images", "annotations.json", output_file_name="/dev/null")
 
-def outputs_for(*rows):
-    return {
-        "output0": torch.stack(rows).unsqueeze(0),
-        "output1": torch.ones(1, NUM_COEFFS, PROTO_SIZE, PROTO_SIZE),
-    }
-
-
-def test_boxes_come_back_normalized_to_the_original_image():
-    # In the 640x640 letterboxed frame the box sits at (100,180)-(300,380).
-    # Dropping the 80-row pad puts it at (100,100)-(300,300) on the 640x480
-    # source, and sab.evaluation reads that as a fraction of the source size.
-    boxes, _, _, _ = postprocess_output(outputs_for(detection(100, 180, 300, 380, 0.9, 3)), METADATA)
-
-    assert boxes.shape == (1, 4)
-    assert torch.allclose(boxes[0], torch.tensor([100 / 640, 100 / 480, 300 / 640, 300 / 480]))
-
-
-def test_labels_and_scores_survive_the_row_split():
-    _, labels, scores, _ = postprocess_output(outputs_for(detection(10, 90, 50, 130, 0.75, 17)), METADATA)
-
-    assert labels.dtype == torch.int64
-    assert labels.tolist() == [17]
-    assert scores.tolist() == [0.75]
-
-
-def test_masks_are_original_resolution_and_cropped_to_their_box():
-    _, _, _, masks = postprocess_output(outputs_for(detection(100, 180, 300, 380, 0.9, 3)), METADATA)
-
-    assert masks.shape == (1, ORIG_H, ORIG_W)
-    assert masks.dtype == torch.bool
-    # Positive everywhere before the crop, so what is left is exactly the box.
-    assert masks[0, 100:300, 100:300].all()
-    assert int(masks.sum()) == 200 * 200
-
-
-def test_zero_score_rows_are_dropped():
-    # A NMS-free export pads its 300 slots with zero-score rows.
-    outputs = outputs_for(
-        detection(100, 180, 300, 380, 0.9, 3),
-        detection(0, 0, 0, 0, 0.0, 0),
-    )
-    boxes, labels, scores, masks = postprocess_output(outputs, METADATA)
-
-    assert len(boxes) == len(labels) == len(scores) == len(masks) == 1
-    assert scores.tolist() == pytest.approx([0.9])
-
-
-def test_an_empty_detection_set_returns_empty_tensors():
-    boxes, labels, scores, masks = postprocess_output(outputs_for(detection(0, 0, 0, 0, 0.0, 0)), METADATA)
-
-    assert boxes.shape == (0, 4)
-    assert labels.shape == (0,)
-    assert scores.shape == (0,)
-    assert masks.shape == (0, ORIG_H, ORIG_W)
-
-
-def test_a_channels_first_output0_is_rejected():
-    # The bucket exports are (1, 300, 38). A transposed tensor is a wrong
-    # artifact, and the adapter refuses it instead of adapting.
-    outputs = outputs_for(detection(100, 180, 300, 380, 0.9, 3))
-    outputs["output0"] = outputs["output0"].transpose(1, 2).contiguous()
-
-    with pytest.raises(ValueError, match="output0"):
-        postprocess_output(outputs, METADATA)
+    assert len(captured) == 5
+    assert all(request.graph_surgery_func is fuse_yolo_mask_postprocessing_into_onnx for request in captured)
+    assert all(request.needs_class_remapping for request in captured)
 
 
 def test_the_trt_class_replays_a_cuda_graph_like_every_other_yolo26_row(monkeypatch):
-    # b388156 settled this for yolo26: TRT rows are timed as graph replay. The
-    # yolo26_seg branch inherited use_cuda_graph=False from the yolov11 seg
-    # copy it started as.
-    captured = {}
+    seen = {}
 
-    def fake_init(self, model_path, image_input_name=None, use_cuda_graph=True, prediction_type="bbox"):
-        captured.update(use_cuda_graph=use_cuda_graph, prediction_type=prediction_type)
+    def fake_init(self, model_path, image_input_name=None, use_cuda_graph=False, prediction_type="bbox"):
+        seen.update(use_cuda_graph=use_cuda_graph, prediction_type=prediction_type)
 
     monkeypatch.setattr(TRTInference, "__init__", fake_init)
-    YOLO26SegTRTInference("yolo26n-seg.engine")
+    y26seg.YOLO26SegTRTInference("model.onnx")
 
-    assert captured["use_cuda_graph"] is True
-    assert captured["prediction_type"] == "segm"
+    assert seen == {"use_cuda_graph": True, "prediction_type": "segm"}
+
+
+def _plain_seg_model(path, k=8, coeffs=NUM_COEFFS, proto=20):
+    """A minimal graph with the plain seg export's output contract: constant
+    detections (1,k,6+coeffs) and prototypes (1,coeffs,proto,proto)."""
+    det = numpy_helper.from_array(np.zeros((1, k, 6 + coeffs), np.float32), name="_det_const")
+    pro = numpy_helper.from_array(np.ones((1, coeffs, proto, proto), np.float32), name="_pro_const")
+    image = helper.make_tensor_value_info("images", TensorProto.FLOAT, [1, 3, 640, 640])
+    out0 = helper.make_tensor_value_info("output0", TensorProto.FLOAT, [1, k, 6 + coeffs])
+    out1 = helper.make_tensor_value_info("output1", TensorProto.FLOAT, [1, coeffs, proto, proto])
+    nodes = [
+        helper.make_node("Shape", ["images"], ["_shape_unused"]),
+        helper.make_node("Identity", ["_det_const"], ["output0"]),
+        helper.make_node("Identity", ["_pro_const"], ["output1"]),
+    ]
+    graph = helper.make_graph(nodes, "plain_seg", [image], [out0, out1], initializer=[det, pro])
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 19)])
+    onnx.save(model, path)
+    return path
+
+
+def test_the_surgery_rewrites_a_plain_export_to_the_fused_contract(tmp_path):
+    plain = _plain_seg_model(str(tmp_path / "tiny-seg.onnx"))
+
+    fused_path = fuse_yolo_mask_postprocessing_into_onnx(plain)
+
+    fused = onnx.load(fused_path)
+    output_names = [o.name for o in fused.graph.output]
+    assert output_names == ["_det_meta", "_masks_cropped"]
+    op_types = {node.op_type for node in fused.graph.node}
+    # The mask assembly the published numbers time inside the engine.
+    assert {"Split", "MatMul", "Sigmoid"} <= op_types

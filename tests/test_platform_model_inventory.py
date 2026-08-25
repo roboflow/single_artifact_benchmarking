@@ -79,25 +79,18 @@ def test_rows_without_an_artifact_are_not_run(absent):
     assert absent not in {model.model_id for model in named.PLATFORM_MODELS}
 
 
-def test_fused_nms_seg_rows_carry_the_mask_graph_surgery():
-    # A yolov8/yolov11 seg export carries a fused NMS, so its mask matmul has to
-    # be folded into the graph before the engine build.
-    fused_nms_seg = [
-        model
-        for model in named.PLATFORM_MODELS
-        if model.model_id.endswith("-seg") and not model.model_id.startswith("yolo26")
-    ]
-    assert fused_nms_seg
-    for model in fused_nms_seg:
+def test_yolo_seg_rows_carry_the_mask_graph_surgery():
+    # Every yolo seg row folds the mask matmul, sigmoid, and box crop into the
+    # graph before the engine build — the timed region behind the published seg
+    # numbers. (The rfdetr-seg graphs carry their mask head natively.)
+    yolo_seg = [model for model in named.PLATFORM_MODELS if model.model_id.endswith("-seg")]
+    assert len(yolo_seg) == 15
+    for model in yolo_seg:
         assert model.graph_surgery is named.fuse_yolo_mask_postprocessing_into_onnx
 
-
-def test_yolo26_seg_rows_run_the_plain_export():
-    # YOLO26 is NMS-free: no graph surgery, and the mask matmul happens in torch.
-    yolo26_seg = [model for model in named.PLATFORM_MODELS if model.model_id.startswith("yolo26") and model.model_id.endswith("-seg")]
+    yolo26_seg = [model for model in yolo_seg if model.model_id.startswith("yolo26")]
     assert len(yolo26_seg) == 5
     for model in yolo26_seg:
-        assert model.graph_surgery is None
         assert model.inference_class is named.YOLO26SegTRTInference
         assert model.needs_class_remapping
         assert model.onnx_artifact == f"{model.model_id}.onnx"

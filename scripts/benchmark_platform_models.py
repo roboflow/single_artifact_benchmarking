@@ -153,16 +153,22 @@ YOLO26_MODELS = [
 
 # --- YOLO26 segmentation (CUDA-graph replay, COCO class remapping) -----------
 #
-# No graph surgery: YOLO26 is NMS-free, so the plain ultralytics seg export runs
-# as it is, and the mask matmul happens in torch after inference. Contrast the
-# yolov8/yolov11 seg rows above, whose fused-NMS exports need the mask
-# postprocessing folded into the graph first.
+# The same mask graph surgery as the yolov8/yolov11 seg rows: the published seg
+# numbers time the mask matmul, sigmoid, and box crop inside the engine, so the
+# yolo26 seg rows fold them in too. The only family difference is CUDA-graph
+# replay (NMS-free convention).
 #
 # Note that this script has no artifact preflight: the HEAD check lives in
 # benchmark_platform_nas_models.missing_artifacts, and a run against a missing
 # artifact downloads a 404 XML page and fails inside the TensorRT parser.
 YOLO26_SEG_MODELS = [
-    PlatformModel(f"yolo26{size}-seg", f"yolo26{size}-seg.onnx", YOLO26SegTRTInference, needs_class_remapping=True)
+    PlatformModel(
+        f"yolo26{size}-seg",
+        f"yolo26{size}-seg.onnx",
+        YOLO26SegTRTInference,
+        needs_class_remapping=True,
+        graph_surgery=fuse_yolo_mask_postprocessing_into_onnx,
+    )
     for size in ("n", "s", "m", "l", "x")
 ]
 
