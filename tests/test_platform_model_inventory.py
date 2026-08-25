@@ -134,7 +134,7 @@ def test_seg_family_runs_the_seg_inference_class():
 
 def test_onnx_path_follows_the_family_template():
     family = next(f for f in nas.NAS_FAMILIES if f.family == "rfdetr-nas-parent")
-    assert family.onnx_path((512, 16, 2, 3, 300)) == "nas/rfdetr-nas-parent/512_16_2_3_300/inference_model.onnx"
+    assert family.onnx_path((512, 16, 2, 3, 300)) == "rfdetr-nas-parent/512_16_2_3_300/inference_model.onnx"
 
 
 def test_a_wrong_path_template_stops_the_run_before_it_starts(monkeypatch):
@@ -144,7 +144,7 @@ def test_a_wrong_path_template_stops_the_run_before_it_starts(monkeypatch):
     monkeypatch.setattr(nas.os.path, "exists", lambda path: False)
     missing = nas.missing_artifacts(all_nas_requests())
     assert len(missing) == len(all_nas_requests())
-    assert "nas/rfdetr-nas-parent/384_16_2_2_300/inference_model.onnx" in missing
+    assert "rfdetr-nas-parent/384_16_2_2_300/inference_model.onnx" in missing
 
 
 def test_nas_rows_spell_the_tuple_out():

@@ -111,7 +111,7 @@ NAS_FAMILIES: list[NasFamily] = [
     NasFamily(
         family="rfdetr-nas-parent",
         inference_class=RFDETRTRTInference,
-        onnx_path_template="nas/rfdetr-nas-parent/{config_id}/inference_model.onnx",
+        onnx_path_template="rfdetr-nas-parent/{config_id}/inference_model.onnx",
         configs=(
             (384, 16, 2, 2, 300),  # rfdetr-nano
             (512, 16, 2, 3, 300),  # rfdetr-small
@@ -122,7 +122,7 @@ NAS_FAMILIES: list[NasFamily] = [
     NasFamily(
         family="rfdetr-nas-base-parent",
         inference_class=RFDETRTRTInference,
-        onnx_path_template="nas/rfdetr-nas-base-parent/{config_id}/inference_model.onnx",
+        onnx_path_template="rfdetr-nas-base-parent/{config_id}/inference_model.onnx",
         configs=(
             (700, 20, 1, 5, 300),  # rfdetr-xlarge
             (880, 20, 2, 5, 300),  # rfdetr-2xlarge
@@ -131,7 +131,7 @@ NAS_FAMILIES: list[NasFamily] = [
     NasFamily(
         family="rfdetr-nas-pecoret-parent",
         inference_class=RFDETRTRTInference,
-        onnx_path_template="nas/rfdetr-nas-pecoret-parent/{config_id}/inference_model.onnx",
+        onnx_path_template="rfdetr-nas-pecoret-parent/{config_id}/inference_model.onnx",
         # No named model uses the PE-Core-T backbone, so this family has no
         # named-equivalent tuple to start from. Add the tuples this sweep needs.
         configs=(),
@@ -139,7 +139,7 @@ NAS_FAMILIES: list[NasFamily] = [
     NasFamily(
         family="rfdetr-nas-seg-parent",
         inference_class=RFDETRSegTRTInference,
-        onnx_path_template="nas/rfdetr-nas-seg-parent/{config_id}/inference_model.onnx",
+        onnx_path_template="rfdetr-nas-seg-parent/{config_id}/inference_model.onnx",
         configs=(
             (312, 12, 1, 4, 100),  # rfdetr-seg-nano
             (384, 12, 2, 4, 100),  # rfdetr-seg-small
