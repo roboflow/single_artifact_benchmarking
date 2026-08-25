@@ -164,6 +164,16 @@ def run_benchmark_on_artifacts(artifact_requests: list[ArtifactBenchmarkRequest]
     return results
 
 
+def nest_latency_by_hardware(results: list[dict], hardware: str) -> list[dict]:
+    """Key latency_stats by hardware, which is the shape consumers read.
+
+    rfdetr_internal.engine.load_timing_results_file expects
+    `latency_stats: {<hardware>: stats}`. Do not flatten this, and do not
+    rename the inner keys: the consumer falls back to `median`.
+    """
+    return [{**result, "latency_stats": {hardware: result["latency_stats"]}} for result in results]
+
+
 def pretty_print_results(results: list[dict]):
     """
     Prints summary runtime info plus COCO AP/AR breakdown.
