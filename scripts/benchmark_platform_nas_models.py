@@ -175,7 +175,7 @@ def main(
     buffer_time: float = BUFFER_TIME_S,
     output_file_name: str = "platform_nas_models_results.json",
     hardware: str | None = None,
-    max_images: int | None = None,
+    max_images: int | None = 100,
 ):
     hardware = hardware or os.environ.get("SAB_HARDWARE") or DEFAULT_HARDWARE
     environment = collect_environment()
