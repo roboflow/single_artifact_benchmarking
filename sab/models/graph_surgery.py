@@ -218,3 +218,4 @@ def fuse_yolo_mask_postprocessing_into_onnx(in_path):
     print(f"Saved {out_path}\nOutputs: _det_meta=({B},{K},6), _masks_cropped=({B},{K},{H},{W})")
 
     return out_path
+

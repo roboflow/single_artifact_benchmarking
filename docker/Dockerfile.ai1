@@ -1,0 +1,68 @@
+# SAB benchmarking image for AI1 (Advantech ICAM-540, Jetson Orin NX, JetPack 6.2).
+#
+# The base is the Jetson serving image, which is the deployment context of the
+# AI1 and the twin of the T4 base at the same serving release. Latency numbers
+# only compare inside one base pin, so the pin is by digest.
+#
+# The digest below is roboflow/roboflow-inference-server-jetson-6.2.0:1.4.1,
+# read from Docker Hub on 2026-08-24 (the same release and digest that
+# model-latency-benchmarking docker/Dockerfile.ai1 measures). Change the pin in
+# its own commit. Do not use :latest.
+#
+# This image is linux/arm64 only. Build it on the device, or with an arm64
+# builder.
+ARG BASE_IMAGE=roboflow/roboflow-inference-server-jetson-6.2.0:1.4.1@sha256:da1936429c0153d384edd5bedb95fbbf46be360a8832a3bd87ec94210a80b55a
+FROM ${BASE_IMAGE}
+
+ARG BASE_IMAGE
+ARG SAB_GIT_SHA=unknown
+
+LABEL org.opencontainers.image.source="https://github.com/roboflow/single_artifact_benchmarking" \
+      org.opencontainers.image.revision="${SAB_GIT_SHA}" \
+      com.roboflow.sab.hardware="AI1" \
+      com.roboflow.sab.base_image="${BASE_IMAGE}"
+
+# sab.environment.collect_environment() reads these values at runtime.
+ENV SAB_BASE_IMAGE="${BASE_IMAGE}" \
+    SAB_GIT_SHA="${SAB_GIT_SHA}" \
+    SAB_HARDWARE="AI1" \
+    SAB_CACHE_DIR=/cache
+
+WORKDIR /sab
+
+# The 1.4.1 serving bases ship no pip (the gpu base uninstalls it in its
+# builder; the jetson base drops the console scripts). Bootstrap it once;
+# every later install still uses --no-deps so the serving stack stays intact.
+RUN python3 -m pip --version >/dev/null 2>&1 || ( \
+    python3 -c "import urllib.request; urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', '/tmp/get-pip.py')" && \
+    python3 /tmp/get-pip.py --break-system-packages --no-warn-script-location && \
+    rm /tmp/get-pip.py )
+
+# Every pip install must use --no-deps. SAB's requirements.txt pins tensorrt and
+# torch, and those pins must not override the serving image's stack. On this
+# base both torch and ONNX Runtime are source builds against Tegra CUDA, and no
+# PyPI wheel replaces them with anything that runs.
+COPY docker/requirements-lite.txt /sab/docker/requirements-lite.txt
+RUN python3 -m pip install --no-cache-dir --no-deps -r docker/requirements-lite.txt
+
+COPY . /sab
+RUN python3 -m pip install --no-cache-dir --no-deps .
+
+# The pure-python smoke always runs. tensorrt and torch on Tegra dlopen host
+# L4T libraries (libnvos.so) that the CSV-mode nvidia runtime mounts at run
+# time. An on-device build has them, because nvidia is the default runtime
+# there. An off-device arm64 build does not, so the deep-import smoke is gated
+# on the library and runs on-device instead.
+RUN python3 -c "import sab, sab.environment, sab.tegra_clock_watch" \
+    && if ldconfig -p | grep -q libnvos || [ -e /usr/lib/aarch64-linux-gnu/tegra/libnvos.so ]; then \
+        python3 -c "import torch, tensorrt, onnxruntime, sab.models.utils, sab.models.benchmark_rfdetr, sab.models.benchmark_yolov11_seg" \
+        && python3 -c "import tensorrt, torch; print('tensorrt', tensorrt.__version__, 'torch', torch.__version__, 'cuda', torch.version.cuda)"; \
+    else \
+        echo "SMOKE SKIPPED: no Tegra host libraries (off-device build). Run the tensorrt/torch import smoke on-device."; \
+    fi
+
+# The serving base image starts the inference server by default. This image is
+# a benchmark harness, so reset the entrypoint and give the run command on the
+# docker run command line.
+ENTRYPOINT []
+CMD ["bash"]

@@ -6,7 +6,7 @@ from typing import Callable
 from supervision.utils.file import read_json_file
 from supervision.dataset.formats.coco import coco_categories_to_classes, build_coco_class_index_mapping
 
-from sab.clock_watch import ThrottleMonitor, CPUFrequencyMonitor
+from sab.clock_watch import CPUFrequencyMonitor, open_throttle_monitor
 from sab.onnx_inference import ONNXInferenceCUDA, ONNXInferenceCPU
 from sab.trt_inference import TRTInference, build_engine
 from sab.evaluation import evaluate
@@ -55,6 +55,7 @@ class ArtifactBenchmarkRequest:
             max_images: int|None = None,
             graph_surgery_func: Callable[str, str]|None = None,
             max_dets: int = 100,
+            model_id: str|None = None,
         ):
         self.onnx_path = onnx_path
         self.inference_class = inference_class
@@ -64,9 +65,14 @@ class ArtifactBenchmarkRequest:
         self.max_images = max_images
         self.graph_surgery_func = graph_surgery_func
         self.max_dets = max_dets
-        
+        # The name of the row: the platform key, or the NAS child id. One
+        # artifact can carry several ids, and graph surgery rewrites onnx_path
+        # mid-run, so the file name alone cannot name a row.
+        self.model_id = model_id or onnx_path
+
     def dump(self):
         return {
+            "model_id": self.model_id,
             "onnx_path": self.onnx_path,
             "inference_class": self.inference_class.__name__,
             "is_trt": issubclass(self.inference_class, TRTInference),
@@ -100,7 +106,7 @@ def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images
 
         if not os.path.exists(engine_path):
             print(f"Building engine for {artifact_request.onnx_path} and saving to {engine_path}...")
-            with ThrottleMonitor() as throttle_monitor:
+            with open_throttle_monitor() as throttle_monitor:
                 build_engine(artifact_request.onnx_path, engine_path, use_fp16=artifact_request.needs_fp16)
             # After the with block the worker has joined, so the verdict is final.
             if throttle_monitor.did_throttle():
@@ -128,7 +134,7 @@ def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images
             else:
                 print("CPU frequency stable during evaluation. Latency numbers should be reliable.")
     else:
-        with ThrottleMonitor() as throttle_monitor:
+        with open_throttle_monitor() as throttle_monitor:
             accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, buffer_time=artifact_request.buffer_time, max_images=artifact_request.max_images, max_dets=artifact_request.max_dets)
         # After the with block the worker has joined, so the verdict is final.
         if throttle_monitor.did_throttle():
@@ -147,6 +153,7 @@ def run_benchmark_on_artifacts(artifact_requests: list[ArtifactBenchmarkRequest]
     for artifact_request in artifact_requests:
         accuracy_stats, latency_stats, throttled = run_benchmark_on_artifact(artifact_request, images_dir, annotations_file_path)
         result = {
+            "model_id": artifact_request.model_id,
             "artifact_request": artifact_request.dump(),
             "accuracy_stats": accuracy_stats,
             "latency_stats": latency_stats,
@@ -155,6 +162,16 @@ def run_benchmark_on_artifacts(artifact_requests: list[ArtifactBenchmarkRequest]
         print(result)
         results.append(result)
     return results
+
+
+def nest_latency_by_hardware(results: list[dict], hardware: str) -> list[dict]:
+    """Key latency_stats by hardware, which is the shape consumers read.
+
+    rfdetr_internal.engine.load_timing_results_file expects
+    `latency_stats: {<hardware>: stats}`. Do not flatten this, and do not
+    rename the inner keys: the consumer falls back to `median`.
+    """
+    return [{**result, "latency_stats": {hardware: result["latency_stats"]}} for result in results]
 
 
 def pretty_print_results(results: list[dict]):
@@ -186,13 +203,20 @@ def pretty_print_results(results: list[dict]):
     def _fmt(x, width=6, prec=1):
         return f"{x:{width}.{prec}f}" if isinstance(x, (int, float)) else f"{'—':>{width}}"
 
+    def _model(result):
+        # Results written before model_id existed name their row by artifact.
+        request = result['artifact_request']
+        return request.get('model_id') or request['onnx_path']
+
+    name_width = max([30] + [len(_model(result)) for result in results])
+
     # ---------- Summary table (keep your original columns; add AP75) ----------
-    header = f"{'Model':30} {'Runtime':8} {'FP16':5} {'mAP50':>6} {'mAP50-95':>9} {'AP75':>6} {'Latency':>9} {'Throttled':>9}"
+    header = f"{'Model':{name_width}} {'Runtime':8} {'FP16':5} {'mAP50':>6} {'mAP50-95':>9} {'AP75':>6} {'Latency':>9} {'Throttled':>9}"
     print(header)
     print("-" * len(header))
 
     for result in results:
-        model     = result['artifact_request']['onnx_path']
+        model     = _model(result)
         runtime   = "TRT" if result['artifact_request']['is_trt'] else ("ONNX-CPU" if result['artifact_request'].get('is_cpu') else "ONNX-CUDA")
         fp16      = result['artifact_request']['needs_fp16']
         stats     = result['accuracy_stats']
@@ -202,29 +226,29 @@ def pretty_print_results(results: list[dict]):
         latency   = result.get('latency_stats', {}).get('median', None)
         throttled = result.get('throttled', False)
 
-        print(f"{model:30} {runtime:8} {'yes' if fp16 else 'no':5} "
+        print(f"{model:{name_width}} {runtime:8} {'yes' if fp16 else 'no':5} "
               f"{_fmt(map50)} {_fmt(map50_95,9)} {_fmt(ap75)} {_fmt(latency,9,2)} {'yes' if throttled else 'no':>9}")
 
     # ---------- AP breakdown (size buckets) ----------
     print("\nAP breakdown (COCO):")
-    ap_hdr = f"{'Model':30} {'AP_s':>6} {'AP_m':>6} {'AP_l':>6}"
+    ap_hdr = f"{'Model':{name_width}} {'AP_s':>6} {'AP_m':>6} {'AP_l':>6}"
     print(ap_hdr)
     print("-" * len(ap_hdr))
     for result in results:
-        model = result['artifact_request']['onnx_path']
+        model = _model(result)
         stats = result['accuracy_stats']
         ap_s  = _pct(stats, 3)
         ap_m  = _pct(stats, 4)
         ap_l  = _pct(stats, 5)
-        print(f"{model:30} {_fmt(ap_s)} {_fmt(ap_m)} {_fmt(ap_l)}")
+        print(f"{model:{name_width}} {_fmt(ap_s)} {_fmt(ap_m)} {_fmt(ap_l)}")
 
     # ---------- AR breakdown (maxDets + size buckets) ----------
     print("\nAR breakdown (COCO):")
-    ar_hdr = f"{'Model':30} {'AR@1':>6} {'AR@10':>6} {'AR@max_dets':>13} {'AR_s':>6} {'AR_m':>6} {'AR_l':>6}"
+    ar_hdr = f"{'Model':{name_width}} {'AR@1':>6} {'AR@10':>6} {'AR@max_dets':>13} {'AR_s':>6} {'AR_m':>6} {'AR_l':>6}"
     print(ar_hdr)
     print("-" * len(ar_hdr))
     for result in results:
-        model  = result['artifact_request']['onnx_path']
+        model  = _model(result)
         stats  = result['accuracy_stats']
         ar1    = _pct(stats, 6)
         ar10   = _pct(stats, 7)
@@ -232,4 +256,4 @@ def pretty_print_results(results: list[dict]):
         ar_s   = _pct(stats, 9)
         ar_m   = _pct(stats, 10)
         ar_l   = _pct(stats, 11)
-        print(f"{model:30} {_fmt(ar1)} {_fmt(ar10)} {_fmt(armax_dets,13)} {_fmt(ar_s)} {_fmt(ar_m)} {_fmt(ar_l)}")
+        print(f"{model:{name_width}} {_fmt(ar1)} {_fmt(ar10)} {_fmt(armax_dets,13)} {_fmt(ar_s)} {_fmt(ar_m)} {_fmt(ar_l)}")
