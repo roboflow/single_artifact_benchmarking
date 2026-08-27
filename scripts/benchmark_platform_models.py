@@ -38,7 +38,10 @@ from sab.models.benchmark_yolov8 import YOLOv8TRTInference
 from sab.models.benchmark_yolov8_seg import YOLOv8SegTRTInference
 from sab.models.benchmark_yolov11 import YOLOv11TRTInference
 from sab.models.benchmark_yolov11_seg import YOLOv11SegTRTInference
-from sab.models.graph_surgery import fuse_yolo_mask_postprocessing_into_onnx
+from sab.models.graph_surgery import (
+    fuse_yolo_mask_postprocessing_into_onnx,
+    fuse_yolo26_mask_postprocessing_into_onnx,
+)
 from sab.models.utils import (
     ArtifactBenchmarkRequest,
     nest_latency_by_hardware,
@@ -167,7 +170,7 @@ YOLO26_SEG_MODELS = [
         f"yolo26{size}-seg.onnx",
         YOLO26SegTRTInference,
         needs_class_remapping=True,
-        graph_surgery=fuse_yolo_mask_postprocessing_into_onnx,
+        graph_surgery=fuse_yolo26_mask_postprocessing_into_onnx,
     )
     for size in ("n", "s", "m", "l", "x")
 ]
