@@ -85,18 +85,15 @@ def test_yolo_seg_rows_carry_the_mask_graph_surgery():
     # numbers. (The rfdetr-seg graphs carry their mask head natively.)
     yolo_seg = [model for model in named.PLATFORM_MODELS if model.model_id.endswith("-seg")]
     assert len(yolo_seg) == 15
+    for model in yolo_seg:
+        assert model.graph_surgery is named.fuse_yolo_mask_postprocessing_into_onnx
+
     yolo26_seg = [model for model in yolo_seg if model.model_id.startswith("yolo26")]
     assert len(yolo26_seg) == 5
-    for model in yolo_seg:
-        if model in yolo26_seg:
-            # The upstream variant behind the published yolo26-seg rows:
-            # logit masks resized and cropped in-graph, no sigmoid.
-            assert model.graph_surgery is named.fuse_yolo26_mask_postprocessing_into_onnx
-            assert model.inference_class is named.YOLO26SegTRTInference
-            assert model.onnx_artifact == f"{model.model_id}.onnx"
-        else:
-            assert model.graph_surgery is named.fuse_yolo_mask_postprocessing_into_onnx
+    for model in yolo26_seg:
+        assert model.inference_class is named.YOLO26SegTRTInference
         assert model.needs_class_remapping
+        assert model.onnx_artifact == f"{model.model_id}.onnx"
 
 
 # --- NAS children ------------------------------------------------------------

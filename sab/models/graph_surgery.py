@@ -221,11 +221,15 @@ def fuse_yolo_mask_postprocessing_into_onnx(in_path):
 
 
 # The yolo26-seg variant, ported verbatim from the upstream yolo26_seg branch
-# (3e6e3f2) — the pipeline behind the published yolo26-seg README rows. It
-# differs from the shared function above in three ways: masks stay raw logits
-# (no Sigmoid), the graph resizes them to the model-input grid, and the box
-# crop runs on that grid. The matching postprocess binarizes logits at 0
-# (the sigmoid-0.5 cut).
+# (3e6e3f2). It differs from the shared function above in three ways: masks
+# stay raw logits (no Sigmoid), the graph resizes them to the model-input
+# grid, and the box crop runs on that grid. Measured on T4 (2026-08-27): the
+# closest mAP to the published yolo26-seg rows (-0.3..-1.2 AP), but the
+# in-graph 300x640x640 resize adds ~6.6 ms to every engine (+53..294% vs the
+# published latencies), so it is NOT the published pipeline and no benchmark
+# row uses it. The upstream branch itself ran the plain export with its torch
+# postprocess; the residual accuracy gap most likely lives in the original
+# (never-archived) ONNX exports.
 def fuse_yolo26_mask_postprocessing_into_onnx(in_path):
     out_path = in_path.replace(".onnx", "-fused26.onnx")
     
