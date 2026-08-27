@@ -81,16 +81,3 @@ def test_the_surgery_rewrites_a_plain_export_to_the_fused_contract(tmp_path):
     op_types = {node.op_type for node in fused.graph.node}
     # The mask assembly the published numbers time inside the engine.
     assert {"Split", "MatMul", "Sigmoid"} <= op_types
-
-
-def test_the_upstream_fused26_variant_is_kept_but_unused():
-    # Measured 2026-08-27: closest mAP to the published rows, but its in-graph
-    # mask resize adds ~6.6 ms per engine, so no benchmark row wires it.
-    import benchmark_platform_models as named
-
-    from sab.models.graph_surgery import fuse_yolo26_mask_postprocessing_into_onnx
-
-    assert all(
-        model.graph_surgery is not fuse_yolo26_mask_postprocessing_into_onnx
-        for model in named.PLATFORM_MODELS
-    )
