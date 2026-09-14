@@ -273,22 +273,26 @@ class BuildProgress(trt.IProgressMonitor):
                 print('SAB_BUILD_FINISHED', phase_name, 'seconds', round(now - started, 1), flush=True)
 
 
-def build_joint(onnx_path, cache, workspace_gib=4):
+def build_joint(onnx_path, cache, workspace_gib=4, **build_options):
     """Stock TRT build preserving the explicit PyTorch FP16/FP32 islands."""
     read_contract(onnx_path)
-    return build_stock_typed(onnx_path, cache, workspace_gib)
+    return build_stock_typed(onnx_path, cache, workspace_gib, **build_options)
 
 
-def build_stock_typed(onnx_path, cache, workspace_gib=4):
+def build_stock_typed(onnx_path, cache, workspace_gib=4, *, optimization_level=3, max_aux_streams=None):
     """Same typed builder for joint artifacts and separately labeled controls.
 
     A raw detector control is not accepted by the full-pose handler/evaluator.
     This helper changes no graph or precision choices.
     """
+    if not 0 <= optimization_level <= 5 or (max_aux_streams is not None and max_aux_streams < 0):
+        raise ValueError('optimization_level must be 0..5 and max_aux_streams nonnegative or None')
     identity = dict(onnx_sha256=digest(onnx_path), tensorrt=trt.__version__,
-        strongly_typed=True, workspace_gib=workspace_gib, optimization_level=3,
+        strongly_typed=True, workspace_gib=workspace_gib, optimization_level=optimization_level,
         gpu=torch.cuda.get_device_name(), capability=torch.cuda.get_device_capability(),
         custom_plugins=False)
+    if max_aux_streams is not None:
+        identity['max_aux_streams'] = max_aux_streams
     key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     folder = Path(cache) / key
     engine_path, receipt_path = folder / 'model.engine', folder / 'build.json'
@@ -311,7 +315,9 @@ def build_stock_typed(onnx_path, cache, workspace_gib=4):
     config = builder.create_builder_config()
     config.clear_flag(trt.BuilderFlag.TF32)
     config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace_gib << 30)
-    config.builder_optimization_level = 3
+    config.builder_optimization_level = optimization_level
+    if max_aux_streams is not None:
+        config.max_aux_streams = max_aux_streams
     progress = BuildProgress()
     config.progress_monitor = progress
     engine = builder.build_serialized_network(network, config)
@@ -337,6 +343,9 @@ def main():
     p.add_argument('--max-images', type=int)
     p.add_argument('--buffer-seconds', type=float, default=0.2)
     p.add_argument('--workspace-gib', type=int, default=4)
+    p.add_argument('--optimization-level', type=int, choices=range(6), default=3)
+    p.add_argument('--max-aux-streams', type=int,
+                   help='optional stock TRT stream limit; omitted leaves the compiler default')
     p.add_argument('--cuda-pool-mib', type=int, default=1024)
     p.add_argument('--save-predictions', action='store_true',
                    help='opt-in compact pose/detector-output cache for offline F1 and parity')
@@ -350,7 +359,8 @@ def main():
 
     if a.max_images is not None and a.max_images < 1:
         p.error('--max-images must be positive')
-    if a.buffer_seconds < 0 or a.cuda_pool_mib < 0 or a.workspace_gib < 1:
+    if (a.buffer_seconds < 0 or a.cuda_pool_mib < 0 or a.workspace_gib < 1
+            or (a.max_aux_streams is not None and a.max_aux_streams < 0)):
         p.error('invalid timing/build policy')
     cache_path = a.output.with_suffix('.npz')
     if a.save_predictions and cache_path.exists():
@@ -359,7 +369,8 @@ def main():
     # Match the inherited evaluator's COCO.getImgIds() insertion order exactly.
     image_ids = [image['id'] for image in native['images']][:a.max_images]
     with exclusive_gpu(), retain_cuda_pool(a.cuda_pool_mib):
-        engine, receipt = build_joint(a.onnx, a.engine_cache, a.workspace_gib)
+        engine, receipt = build_joint(a.onnx, a.engine_cache, a.workspace_gib,
+                                     optimization_level=a.optimization_level, max_aux_streams=a.max_aux_streams)
         runner = RFPoseJointTRTInference(engine, a.onnx, threshold=a.threshold,
                                         use_cuda_graph=a.cuda_graph == 'on')
         if runner.contract['keypoints'] != 17:
@@ -412,6 +423,7 @@ def main():
         telemetry=dict(before=before, during=during, after=after), prediction_cache=saved,
         images=len(image_ids), full_val=len(image_ids) == len(native['images']),
         annotation_sha256=digest(a.annotations), source_sha256=source_identity,
+        clock_watch_sha256=digest(Path(__file__).resolve().parents[1] / 'clock_watch.py'),
         boundary='formatted detector image + original source pixels -> final pose points and scores; '
                  'filtering, crops, GMM decode and scoring all in one engine')
     a.output.parent.mkdir(parents=True, exist_ok=True)

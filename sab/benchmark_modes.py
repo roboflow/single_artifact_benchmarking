@@ -90,6 +90,7 @@ def main():
                            handler_sha256=digest(inspect.getfile(handler)))
     torch.set_num_threads(2)
     from sab.clock_watch import ThrottleMonitor
+    source_identity['clock_watch_sha256'] = digest(inspect.getfile(ThrottleMonitor))
 
     cases = []
     graph_status = None

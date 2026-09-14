@@ -39,19 +39,21 @@ for name in (
 # ──────────────────────────────────────────────────────────────────────────────
 NVML_SUCCESS                = 0
 NVML_EVENT_TYPE_CLOCK       = 0x10                         # any clock change  [oai_citation:0‡docs.nvidia.com](https://docs.nvidia.com/deploy/archive/R525/nvml-api/group__nvmlEventType.html?utm_source=chatgpt.com)
-NVML_CLOCK_GRAPHICS         = 0                            # SM core clock domain
-NVML_CLOCK_MEM              = 1                            # Memory clock domain
+NVML_CLOCK_GRAPHICS         = 0
+NVML_CLOCK_SM               = 1
+NVML_CLOCK_MEM              = 2
 
 # Throttle-reason bitmask – report them all
 REASONS = {
     0x00000001: "GPU idle",
-    0x00000002: "Thermal",
+    0x00000002: "Application clocks setting",
     0x00000004: "SW power-cap",
     0x00000008: "HW slowdown",
     0x00000010: "Sync-boost",
     0x00000020: "SW thermal slowdown",
     0x00000040: "HW thermal slowdown",
     0x00000080: "HW power-brake",
+    0x00000100: "Display clocks setting",
 }                                                # constants list  [oai_citation:1‡docs.nvidia.com](https://docs.nvidia.com/deploy/nvml-api/group__nvmlClocksThrottleReasons.html?utm_source=chatgpt.com)
 
 class Event(ct.Structure):        # minimal nvmlEventData_t
@@ -65,7 +67,8 @@ def chk(ret, func):
         nvml.nvmlShutdown()
         sys.exit(f"{func} failed with code {ret}")
 
-def emit_clock_changes():
+def emit_clock_changes(stop_requested=None):
+    stop_requested = stop_requested or (lambda: False)
     chk(nvml.nvmlInit_v2(), "nvmlInit")
 
     dev = ct.c_void_p()
@@ -78,23 +81,26 @@ def emit_clock_changes():
         "register CLOCK")
 
     ev = Event()
-    while True:
-        rc = nvml.nvmlEventSetWait(evset, ct.byref(ev), NVML_TIMEOUT)  # ms
-        if rc != NVML_SUCCESS:                              # timeout → loop
-            continue
+    try:
+        while not stop_requested():
+            rc = nvml.nvmlEventSetWait(evset, ct.byref(ev), NVML_TIMEOUT)  # ms
+            if rc != NVML_SUCCESS:                              # timeout → loop
+                continue
 
-        # Get current SM & MEM clocks
-        sm = ct.c_uint(); mem = ct.c_uint()
-        nvml.nvmlDeviceGetClockInfo(dev, NVML_CLOCK_GRAPHICS, ct.byref(sm))
-        nvml.nvmlDeviceGetClockInfo(dev, NVML_CLOCK_MEM,      ct.byref(mem))
+            # NVML clock enums: SM=1, memory=2 (graphics is 0).
+            # https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceEnums.html
+            sm = ct.c_uint(); mem = ct.c_uint()
+            nvml.nvmlDeviceGetClockInfo(dev, NVML_CLOCK_SM, ct.byref(sm))
+            nvml.nvmlDeviceGetClockInfo(dev, NVML_CLOCK_MEM, ct.byref(mem))
 
-        # Decode throttle reasons
-        mask = ct.c_ulonglong()
-        nvml.nvmlDeviceGetCurrentClocksThrottleReasons(dev, ct.byref(mask))
-        reasons = [name for bit, name in REASONS.items() if mask.value & bit]
-        reason_txt = ", ".join(reasons) or "No throttle (max clocks)"
-
-        yield sm.value, mem.value, reason_txt
+            mask = ct.c_ulonglong()
+            nvml.nvmlDeviceGetCurrentClocksThrottleReasons(dev, ct.byref(mask))
+            reasons = [name for bit, name in REASONS.items() if mask.value & bit]
+            reason_txt = ", ".join(reasons) or "No throttle (max clocks)"
+            yield sm.value, mem.value, reason_txt
+    finally:
+        nvml.nvmlEventSetFree(evset)
+        nvml.nvmlShutdown()
 
 class ThrottleMonitor:
     def __init__(self, target_freq: int|None=None):
@@ -105,7 +111,7 @@ class ThrottleMonitor:
     
     def _check_for_throttling(self):
         # Get the generator
-        clock_generator = emit_clock_changes()
+        clock_generator = emit_clock_changes(lambda: self._stop_thread)
         
         while not self._stop_thread:
             try:

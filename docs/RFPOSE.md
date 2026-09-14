@@ -48,6 +48,14 @@ inside the ONNX declares the interface and checkpoint/calibration provenance.
 The handler rejects network-only controls, custom operators (including in
 conditional subgraphs), and mismatched ONNX/engine/build receipts.
 
+The default stock build policy is optimization level 3 with TensorRT choosing
+auxiliary streams. `--optimization-level 0..5` and `--max-aux-streams N` expose
+ordinary compiler settings for controlled performance experiments. They are
+part of the cache identity; changing them requires a separate engine and
+fresh output validation. These flags do not rewrite ONNX or weaken its
+explicit precision types. In particular, no aggressive setting is silently
+enabled for just one model family.
+
 The current COCO evaluation entry point is body-17 only. It evaluates every
 image in the supplied annotation file, including no-person images. A reduced
 `--max-images` run is explicitly a smoke test, not a full-validation result.
@@ -86,8 +94,12 @@ The main evaluator follows SAB's existing `ThrottleMonitor`: temporarily
 request maximum supported clocks, retain 200 ms gaps, then reset clocks.
 This needs NVIDIA clock-control permission. It does not increase the power
 limit. Record warmup throttling separately from actual sample telemetry;
-the monitor's historical memory-clock label is not reliable, so the receipt
-also includes `nvidia-smi` telemetry. The inherited monitor restores
+the monitor's historical memory-clock label read NVML domain 1 (SM), not
+domain 2 (memory). The local port now fixes that and the application-clock
+reason label, and releases its event monitor even when no new event arrives.
+The receipt also includes independent `nvidia-smi` telemetry and identifies
+the clock-monitor source. These diagnostic-label fixes do not rewrite old
+timings. The inherited monitor restores
 persistence disabled, matching this T4's initial state; do not assume it
 preserves a different preexisting persistence configuration on other hosts.
 The current entry point finishes warmup/capture before starting the measured

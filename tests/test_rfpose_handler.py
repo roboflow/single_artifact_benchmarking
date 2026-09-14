@@ -5,7 +5,14 @@ import pytest
 import torch
 import torchvision.transforms.functional as TF
 
-from sab.models.benchmark_rfpose import RFPoseJointTRTInference, processed_pose_counts, read_contract
+from sab.models.benchmark_rfpose import RFPoseJointTRTInference, build_stock_typed, processed_pose_counts, read_contract
+
+
+@pytest.mark.parametrize('options', [dict(optimization_level=-1), dict(optimization_level=6),
+                                    dict(max_aux_streams=-1)])
+def test_invalid_build_options_rejected_before_model_or_gpu_access(tmp_path, options):
+    with pytest.raises(ValueError, match='optimization_level'):
+        build_stock_typed(tmp_path / 'does-not-exist.onnx', tmp_path / 'engines', **options)
 
 
 def handler():
