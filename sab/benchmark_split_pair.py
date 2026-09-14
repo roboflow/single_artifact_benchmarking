@@ -22,6 +22,19 @@ from sab.models.benchmark_rfpose import digest
 from sab.models.benchmark_rfpose_split import RFPoseSplitTRTInference
 
 
+def validate_changed_stage(runners, changed_stage):
+    # Permit changes only in explicitly declared stages. Logit selection also
+    # moves sigmoid to the pose input, so that experiment declares "both".
+    if changed_stage == 'pose' and runners[0].detector_receipt != runners[1].detector_receipt:
+        raise ValueError('pose-only comparison must reuse the exact detector engine')
+    if changed_stage == 'detector' and runners[0].pose_receipt != runners[1].pose_receipt:
+        raise ValueError('detector-only comparison must reuse the exact pose engine')
+    for key in ('pose_checkpoint_sha256', 'detector_checkpoint_sha256', 'calibration_sha256',
+                'tokens', 'padding', 'aspect_buckets', 'decode', 'score', 'person_capacity'):
+        if runners[0].contract.get(key) != runners[1].contract.get(key):
+            raise ValueError('comparison changes inference recipe: ' + key)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('baseline', type=Path)
@@ -33,6 +46,7 @@ def main():
     p.add_argument('--threshold', type=float, default=.48)
     p.add_argument('--per-block', type=int, default=10)
     p.add_argument('--buffer-seconds', type=float, default=.2)
+    p.add_argument('--changed-stage', choices=['pose', 'detector', 'both'], default='pose')
     a = p.parse_args()
     if a.output.exists() or a.per_block < 1 or a.buffer_seconds <= 0:
         raise ValueError('fresh output and positive timing policy required')
@@ -43,8 +57,7 @@ def main():
     with exclusive_gpu(), retain_cuda_pool(1024):
         runners = [RFPoseSplitTRTInference(path, a.engine_cache, threshold=a.threshold)
                    for path in (a.baseline, a.variant)]
-        if runners[0].detector_receipt != runners[1].detector_receipt:
-            raise ValueError('precision comparison must reuse the exact detector engine')
+        validate_changed_stage(runners, a.changed_stage)
         image = TF.pil_to_tensor(Image.open(a.image_root/f'{a.image_ids[0]:012d}.jpg').convert('RGB')).cuda()
         for runner in runners:
             runner.prepare(image, counts=(1, 2, 3, 5), warmup=20, capture_pose=False)
@@ -99,6 +112,7 @@ def main():
             throttled = monitor.did_throttle()
         receipt = dict(baseline_sha256=digest(a.baseline), variant_sha256=digest(a.variant),
             detector_build=runners[0].detector_receipt,
+            detector_builds=[runner.detector_receipt for runner in runners], changed_stage=a.changed_stage,
             pose_builds=[runner.pose_receipt for runner in runners], cases=cases,
             buffer_seconds=a.buffer_seconds, throttled=throttled, **source_identity,
             timing_boundary='whole detector + count handoff + pose/crops/GMM; initial input formatting excluded')

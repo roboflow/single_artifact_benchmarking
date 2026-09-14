@@ -44,6 +44,10 @@ def read_manifest(path):
             raise ValueError('requires standard, externally shaped engine stages')
         if key == 'pose' and contract.get('pose_precision_experiment') != manifest['contract'].get('pose_precision_experiment'):
             raise ValueError('pose precision policy does not match the artifact')
+        if contract.get('detector_score_encoding', 'probability') != manifest['contract'].get('detector_score_encoding', 'probability'):
+            raise ValueError('detector/pose score encoding mismatch')
+        if key == 'detector' and contract.get('detector_optimization') != manifest['contract'].get('detector_optimization'):
+            raise ValueError('detector optimization policy does not match the artifact')
     return manifest
 
 
