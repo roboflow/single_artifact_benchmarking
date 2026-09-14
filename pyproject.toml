@@ -1,0 +1,57 @@
+[project]
+name = "single-artifact-benchmarking"
+version = "0.2.0"
+requires-python = "==3.10.*"
+dependencies = [
+  "torch==2.11.0",
+  "torchvision==0.26.0",
+  "numpy==2.2.6",
+  "Pillow==12.2.0",
+  "onnx==1.22.0",
+  "onnxruntime==1.23.2",
+  "supervision==0.30.0",
+  "opencv-python-headless==4.13.0.92",
+  "pycocotools==2.0.11",
+  "faster-coco-eval==1.7.2",
+  "fire==0.7.0",
+  "requests==2.34.2",
+  "tqdm==4.67.3",
+]
+
+[project.optional-dependencies]
+trt = [
+  "tensorrt-cu12==10.4.0",
+  "tensorrt-cu12-libs==10.4.0",
+  "tensorrt-cu12-bindings==10.4.0",
+]
+trt106 = [
+  "tensorrt-cu12==10.6.0.post2",
+  "tensorrt-cu12-libs==10.6.0.post2",
+  "tensorrt-cu12-bindings==10.6.0.post2",
+]
+dev = ["pytest==9.0.2"]
+
+[tool.uv]
+package = false
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+conflicts = [[{ extra = "trt" }, { extra = "trt106" }]]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+tensorrt-cu12-libs = [
+  { url = "https://pypi.nvidia.com/tensorrt-cu12-libs/tensorrt_cu12_libs-10.4.0-py2.py3-none-manylinux_2_17_x86_64.whl", extra = "trt" },
+  { url = "https://pypi.nvidia.com/tensorrt-cu12-libs/tensorrt_cu12_libs-10.6.0.post2-py2.py3-none-manylinux_2_17_x86_64.whl", extra = "trt106" },
+]
+tensorrt-cu12-bindings = [
+  { url = "https://pypi.nvidia.com/tensorrt-cu12-bindings/tensorrt_cu12_bindings-10.4.0-cp310-none-manylinux_2_17_x86_64.whl", extra = "trt" },
+  { url = "https://pypi.nvidia.com/tensorrt-cu12-bindings/tensorrt_cu12_bindings-10.6.0.post2-cp310-none-manylinux_2_17_x86_64.whl", extra = "trt106" },
+]
+
+[tool.uv.extra-build-variables]
+tensorrt-cu12 = { NVIDIA_TENSORRT_DISABLE_INTERNAL_PIP = "1" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

@@ -32,6 +32,10 @@ A notable distinction from the D-FINE implementation is the inclusion of CUDA gr
 
 ## Usage
 
+For RF-DETR + RF-Pose single-engine artifacts, use the pinned `uv`
+environment and [RF-Pose handler guide](docs/RFPOSE.md). Detector filtering,
+cropping and GMM decoding/scoring remain inside that joint artifact.
+
 To run the benchmark:
 
 1. Install dependencies: `pip install -r requirements.txt`

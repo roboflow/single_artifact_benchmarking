@@ -1,1 +1,5 @@
 **/__pycache__/**
+/artifacts/
+/.venv/
+/.venv-trt106/
+/.pytest_cache/
