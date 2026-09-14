@@ -279,7 +279,8 @@ def build_joint(onnx_path, cache, workspace_gib=4, **build_options):
     return build_stock_typed(onnx_path, cache, workspace_gib, **build_options)
 
 
-def build_stock_typed(onnx_path, cache, workspace_gib=4, *, optimization_level=3, max_aux_streams=None):
+def build_stock_typed(onnx_path, cache, workspace_gib=4, *, optimization_level=3, max_aux_streams=None,
+                      input_profiles=None):
     """Same typed builder for joint artifacts and separately labeled controls.
 
     A raw detector control is not accepted by the full-pose handler/evaluator.
@@ -293,6 +294,17 @@ def build_stock_typed(onnx_path, cache, workspace_gib=4, *, optimization_level=3
         custom_plugins=False)
     if max_aux_streams is not None:
         identity['max_aux_streams'] = max_aux_streams
+    if input_profiles is not None:
+        # One dynamic-batch engine, not an engine rebuilt for each capture.
+        # Make the complete min/opt/max specification part of cache identity.
+        normalized = {}
+        for name, bounds in input_profiles.items():
+            if len(bounds) != 3 or not bounds[0] or any(len(s) != len(bounds[0]) for s in bounds):
+                raise ValueError('profiles require three equal-rank min/opt/max shapes')
+            if any(not 1 <= lo <= opt <= hi for lo, opt, hi in zip(*bounds)):
+                raise ValueError('profile dimensions must satisfy 1 <= min <= opt <= max')
+            normalized[name] = [list(s) for s in bounds]
+        identity['input_profiles'] = normalized
     key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     folder = Path(cache) / key
     engine_path, receipt_path = folder / 'model.engine', folder / 'build.json'
@@ -318,6 +330,17 @@ def build_stock_typed(onnx_path, cache, workspace_gib=4, *, optimization_level=3
     config.builder_optimization_level = optimization_level
     if max_aux_streams is not None:
         config.max_aux_streams = max_aux_streams
+    if input_profiles is not None:
+        profile = builder.create_optimization_profile()
+        dynamic = {network.get_input(i).name for i in range(network.num_inputs)
+                   if -1 in tuple(network.get_input(i).shape)}
+        if dynamic != set(input_profiles):
+            raise ValueError('input profiles must identify every dynamic input, and only dynamic inputs')
+        for name, bounds in input_profiles.items():
+            # Python returns None on success and raises ValueError on failure.
+            profile.set_shape(name, *bounds)
+        if config.add_optimization_profile(profile) < 0:
+            raise RuntimeError('could not add optimization profile')
     progress = BuildProgress()
     config.progress_monitor = progress
     engine = builder.build_serialized_network(network, config)

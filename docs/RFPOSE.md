@@ -122,3 +122,46 @@ outputs. Failed capture produces only real off-mode samples, never invented
 on-mode timing. These short probes are not full-COCO latency/accuracy results.
 The exclusive GPU lock also used by the RF-Pose queue prevents concurrent
 benchmarks; the runner refuses to time while another process owns the GPU.
+
+## Two-stage dynamic-batch experiment
+
+`sab.models.benchmark_rfpose_split` also accepts the version-8 manifest
+exported by RF-Pose's `benchmarks.trt.joint_split_export`. This is explicitly
+**two engines**, not a single-engine result or a sum of standalone timings.
+The default policy captures the detector and leaves pose uncaptured.
+
+The detector performs filtering and stable compaction into fixed GPU
+buffers, with an int32 person count. A pinned four-byte count copy is part of
+the detector CUDA graph. The host synchronizes, reads that count, and runs
+one dynamic-batch pose engine on the exact GPU-resident prefix. Crops,
+mixed-aspect pose, GMM decode and scores stay in that second engine. Zero
+people skips pose. The profile spans 1–300; uncached counts are never
+truncated or silently padded. Common count-specific contexts share one
+engine and one activation arena, and must run sequentially.
+
+```bash
+uv run --frozen --extra trt python -m sab.benchmark_split_modes \
+  /path/to/manifest.json --engine-cache artifacts/engines \
+  --output artifacts/split-modes --reference-clocks
+
+uv run --frozen --extra trt python -m sab.check_rfpose_split \
+  /path/to/manifest.json --engine-cache artifacts/engines \
+  --output artifacts/split-stage-check
+
+uv run --frozen --extra trt python -m sab.evaluate_rfpose_split \
+  /path/to/manifest.json --engine-cache artifacts/engines \
+  --images /data/coco/val2017 \
+  --annotations /data/coco/annotations/person_keypoints_val2017.json \
+  --output artifacts/split-validation.json --graphs detector \
+  --threshold 0.48 --save-predictions
+```
+
+The four-mode diagnostic explicitly opts into pose captures to compare all
+policies, and requires identical outputs between graph modes. The ordinary
+runner/evaluator does not capture pose by default. CUDA events bracket the
+**entire** detector/count-copy/host-wait/dispatch/pose sequence; wall-clock
+latency is also recorded by the mode diagnostic. Initial formatting, input
+upload, warmup/capture and trivial final formatting remain outside the timer.
+Different compiler builds may alter floating-point predictions. Exact-input
+stage checks and fresh full-COCO accuracy, not timing or graph-mode equality
+alone, determine whether a result is suitable for publication.
