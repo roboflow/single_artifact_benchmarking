@@ -42,6 +42,8 @@ def read_manifest(path):
         if contract.get('custom_plugins') or any(node.domain not in ('', 'ai.onnx')
                 or node.op_type in ('NonZero', 'If', 'Loop') for node in model.graph.node):
             raise ValueError('requires standard, externally shaped engine stages')
+        if key == 'pose' and contract.get('pose_precision_experiment') != manifest['contract'].get('pose_precision_experiment'):
+            raise ValueError('pose precision policy does not match the artifact')
     return manifest
 
 
@@ -60,6 +62,15 @@ def aligned_arena(size):
     storage = torch.empty(int(size) + 4096, dtype=torch.uint8, device='cuda')
     offset = -storage.data_ptr() % 4096
     return storage[offset:offset + int(size)]
+
+
+def require_fused_attention(information, required):
+    """Fail closed when a precision policy relies on fused wide accumulation."""
+    fused = sum('_gemm_mha_v2' in str(layer)
+                for layer in json.loads(information)['Layers'])
+    if fused != required:
+        raise ValueError(f'precision policy requires {required} fused MHA blocks, found {fused}')
+    return fused
 
 
 class RFPoseSplitTRTInference:
@@ -91,6 +102,14 @@ class RFPoseSplitTRTInference:
         self.pose = self.runtime.deserialize_cuda_engine(self.pose_path.read_bytes())
         if self.detector is None or self.pose is None:
             raise RuntimeError('engine deserialization failed')
+        precision = self.contract.get('pose_precision_experiment', {})
+        required_fused = precision.get('required_fused_mha_blocks')
+        if required_fused is not None:
+            inspector = self.pose.create_engine_inspector()
+            information = inspector.get_engine_information(trt.LayerInformationFormat.JSON)
+            # This target-specific policy is deliberately fail-closed. New TRT
+            # naming/tactics require a fresh audit rather than a silent fallback.
+            require_fused_attention(information, required_fused)
         self.front_context = self.detector.create_execution_context()
         self.front_context.nvtx_verbosity = trt.ProfilingVerbosity.NONE
         self.front_buffers = {}

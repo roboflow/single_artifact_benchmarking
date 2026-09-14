@@ -2,6 +2,8 @@ import pytest
 import inspect
 
 from sab.models.benchmark_rfpose_split import pose_profiles, RFPoseSplitTRTInference
+from sab.models.benchmark_rfpose_split import require_fused_attention
+import json
 
 
 def test_default_policy_captures_only_the_detector():
@@ -26,3 +28,11 @@ def test_one_profile_accepts_every_person_count_without_padded_work():
 def test_profile_rejects_invalid_count_contracts(capacity, optimal):
     with pytest.raises(ValueError):
         pose_profiles(capacity, optimal)
+
+
+def test_fused_attention_policy_fails_closed():
+    names = [f'_gemm_mha_v2_myl_{i}' for i in range(14)]
+    assert require_fused_attention(json.dumps({'Layers': names}), 14) == 14
+    for broken in [names[:-1], ['unknown_new_kernel_name']*14, ['QK', 'softmax', 'AV']]:
+        with pytest.raises(ValueError, match='requires 14 fused MHA'):
+            require_fused_attention(json.dumps({'Layers': broken}), 14)
