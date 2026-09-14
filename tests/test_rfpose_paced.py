@@ -6,6 +6,7 @@ import pytest
 
 from sab.benchmark_rfpose_paced import order, assert_equal, summaries, elapsed
 from sab.models.benchmark_rfpose_crop import formatted_crop, crop_profiles
+from sab.recheck_rfpose_crop import restore_points
 
 
 def test_paired_order_balances_mode_and_position():
@@ -63,3 +64,14 @@ def test_formatted_crop_is_uint8_udp_detector_geometry(box):
 def test_formatted_crop_rejects_bad_boxes(box):
     with pytest.raises(ValueError):
         formatted_crop(np.zeros((32, 32, 3), np.uint8), box, [(16, 16)], 1.25)
+
+
+@pytest.mark.parametrize('hw', [(320,192), (192,320), (256,240)])
+def test_crop_coordinate_restoration_uses_udp_endpoints(hw):
+    h, w = hw
+    box = [13., 29., 112., 237.]
+    coords = np.array([[0.,0.],[(w-1)/2, (h-1)/2],[w-1,h-1]])
+    restored = restore_points(coords, box, 0, [hw], 1.25)
+    width = max(box[2], box[3]*w/h) * 1.25
+    np.testing.assert_allclose(restored[1], [69., 147.5])
+    np.testing.assert_allclose(restored[2]-restored[0], [width, width*h/w])
