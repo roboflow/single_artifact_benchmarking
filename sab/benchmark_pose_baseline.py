@@ -264,7 +264,9 @@ def main():
             input_population='deterministic uniform sample of all val images' if spec['stage'] == 'full_image'
                              else 'deterministic uniform sample of det56 boxes; one crop per engine invocation',
             boundary='device-resident formatted uint8 image -> decoded keypoints and crop/person scores; '
-                     'includes normalization/native decode/scoring/NMS; excludes initial formatting, transfers, inverse affine',
+                     'includes normalization/native decode/scoring; excludes initial formatting, transfers, inverse affine',
+            nms_timing_boundary='two-stage pose module: NMS outside engine; excluded (detector-dependent)'
+                                if spec['stage'] == 'person_crop' else 'one-stage: native NMS inside and timed when used',
             timing_scope='representative real-input paired ABBA/BAAB samples; NOT full-COCO mean latency',
             tensorrt=trt.__version__, torch=torch.__version__, cuda=torch.version.cuda,
             held_reason=spec.get('held_reason'), accuracy_policy='no automatic reuse of old-engine AP/F1')
