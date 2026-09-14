@@ -5,23 +5,23 @@ import numpy as np
 from sab.profiler import CUDAProfiler
 
 
-def build_engine(model_path, engine_path, use_fp16=False):
+def build_engine(model_path, engine_path, use_fp16=False, profiling_verbosity=None):
     logger = trt.Logger(trt.Logger.INFO)
     builder = trt.Builder(logger)
     
     config = builder.create_builder_config()
     if use_fp16:
         config.set_flag(trt.BuilderFlag.FP16)
+    if profiling_verbosity is not None:
+        config.profiling_verbosity = profiling_verbosity
 
     EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
     network = builder.create_network(EXPLICIT_BATCH)
 
     parser = trt.OnnxParser(network, logger)
 
-    with open(model_path, "rb") as f:
-        model_data = f.read()
-    
-    if not parser.parse(model_data):
+    # File-based parsing also resolves ordinary ONNX external weight files.
+    if not parser.parse_from_file(str(model_path)):
         print("Failed to parse ONNX model")
         for error in range(parser.num_errors):
             print(parser.get_error(error))
