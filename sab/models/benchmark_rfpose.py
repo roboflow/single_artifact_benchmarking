@@ -11,6 +11,8 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import threading
+import time
 
 import numpy as np
 import onnx
@@ -53,6 +55,22 @@ def read_contract(path):
     if contract.get('custom_plugins') or not standard_ops(model.graph):
         raise ValueError('this handler accepts stock ONNX/TRT operators only')
     return contract
+
+
+def processed_pose_counts(counts, contract):
+    """Account for padding/fast paths without confusing them with predictions."""
+    counts = np.asarray(counts, dtype=np.int64)
+    batches = contract.get('static_person_batches')
+    if not batches:
+        return counts if contract.get('skip_empty') else np.maximum(counts, 1)
+    batches = np.asarray(batches, dtype=np.int64)
+    indices = np.searchsorted(batches, counts)
+    outside = indices == len(batches)
+    if outside.any() and not contract.get('dynamic_person_fallback'):
+        raise ValueError('returned count exceeds the compiled pose batch capacity')
+    processed = batches[np.minimum(indices, len(batches) - 1)]
+    processed = np.where(outside, counts, processed)
+    return np.where(counts == 0, 0, processed)
 
 
 class BoundedOutput(trt.IOutputAllocator):
@@ -198,7 +216,8 @@ class RFPoseJointTRTInference(TRTInference):
         self.torch_stream.synchronize()
         graph = super()._capture_cuda_graph(input_shape)
         self.graph_status.update(active=graph is not None,
-            reason=None if graph is not None else 'SAB capture failed (data-dependent NonZero/shape execution); uncaptured fallback')
+            reason=None if graph is not None else
+            'SAB capture failed; runtime conditional/data-dependent execution remains uncaptured')
         return graph
 
     def get_outputs(self):
@@ -221,9 +240,51 @@ class RFPoseJointTRTInference(TRTInference):
         return boxes.contiguous(), labels, scores.contiguous(), keypoints.contiguous()
 
 
+class BuildProgress(trt.IProgressMonitor):
+    """Low-frequency, thread-safe progress for large standard-ONNX builds."""
+
+    def __init__(self):
+        super().__init__()
+        self.lock = threading.Lock()
+        self.phases = {}
+        self.last_report = time.monotonic()
+
+    def phase_start(self, phase_name, parent_phase, num_steps):
+        with self.lock:
+            self.phases[phase_name] = (parent_phase, num_steps, time.monotonic())
+            if not parent_phase:
+                print('SAB_BUILD_PHASE', phase_name, 'steps', num_steps, flush=True)
+
+    def step_complete(self, phase_name, step):
+        with self.lock:
+            now = time.monotonic()
+            if now - self.last_report >= 30:
+                _, total, started = self.phases.get(phase_name, (None, None, now))
+                print('SAB_BUILD_PROGRESS', phase_name, step, '/', total,
+                      'seconds', round(now - started, 1), flush=True)
+                self.last_report = now
+        return True
+
+    def phase_finish(self, phase_name):
+        with self.lock:
+            now = time.monotonic()
+            parent, _, started = self.phases.pop(phase_name, (None, None, now))
+            if not parent or now - started >= 10:
+                print('SAB_BUILD_FINISHED', phase_name, 'seconds', round(now - started, 1), flush=True)
+
+
 def build_joint(onnx_path, cache, workspace_gib=4):
     """Stock TRT build preserving the explicit PyTorch FP16/FP32 islands."""
     read_contract(onnx_path)
+    return build_stock_typed(onnx_path, cache, workspace_gib)
+
+
+def build_stock_typed(onnx_path, cache, workspace_gib=4):
+    """Same typed builder for joint artifacts and separately labeled controls.
+
+    A raw detector control is not accepted by the full-pose handler/evaluator.
+    This helper changes no graph or precision choices.
+    """
     identity = dict(onnx_sha256=digest(onnx_path), tensorrt=trt.__version__,
         strongly_typed=True, workspace_gib=workspace_gib, optimization_level=3,
         gpu=torch.cuda.get_device_name(), capability=torch.cuda.get_device_capability(),
@@ -241,18 +302,25 @@ def build_joint(onnx_path, cache, workspace_gib=4):
     builder = trt.Builder(logger)
     network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.STRONGLY_TYPED))
     parser = trt.OnnxParser(network, logger)
+    started = time.monotonic()
+    print('SAB_BUILD_STAGE', 'onnx_import', str(onnx_path), flush=True)
     if not parser.parse_from_file(str(onnx_path)):
         raise RuntimeError('\n'.join(str(parser.get_error(i)) for i in range(parser.num_errors)))
+    imported = time.monotonic()
+    print('SAB_BUILD_STAGE', 'tactic_build', 'import_seconds', imported - started, flush=True)
     config = builder.create_builder_config()
     config.clear_flag(trt.BuilderFlag.TF32)
     config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace_gib << 30)
     config.builder_optimization_level = 3
+    progress = BuildProgress()
+    config.progress_monitor = progress
     engine = builder.build_serialized_network(network, config)
     if engine is None:
         raise RuntimeError('TensorRT build failed')
     folder.mkdir(parents=True)
     engine_path.write_bytes(bytes(engine))
-    receipt = dict(identity=identity, engine_sha256=digest(engine_path))
+    receipt = dict(identity=identity, engine_sha256=digest(engine_path),
+                   onnx_import_seconds=imported - started, engine_build_seconds=time.monotonic() - imported)
     receipt_path.write_text(json.dumps(receipt, indent=2) + '\n')
     return engine_path, receipt
 
@@ -325,10 +393,7 @@ def main():
             raise ValueError('engine returned a detection below its runtime cutoff')
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         with cache_path.open('xb') as out:
-            batches = runner.contract.get('static_person_batches')
-            processed = (np.where(np.asarray(counts) == 0, 0,
-                         np.asarray(batches)[np.searchsorted(batches, counts)]) if batches else
-                         counts if runner.contract.get('skip_empty') else np.maximum(counts, 1))
+            processed = processed_pose_counts(counts, runner.contract)
             np.savez_compressed(out, image_ids=np.asarray(image_ids, dtype=np.int64),
                 prediction_image_ids=np.repeat(image_ids, counts),
                 gate_scores=joined['detector_scores'], keypoints=joined['keypoints'],

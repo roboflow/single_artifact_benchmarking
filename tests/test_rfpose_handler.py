@@ -5,7 +5,7 @@ import pytest
 import torch
 import torchvision.transforms.functional as TF
 
-from sab.models.benchmark_rfpose import RFPoseJointTRTInference, read_contract
+from sab.models.benchmark_rfpose import RFPoseJointTRTInference, processed_pose_counts, read_contract
 
 
 def handler():
@@ -15,6 +15,22 @@ def handler():
     obj.persistent_tensors = {'source_image': torch.empty(1, 3, 640, 640, dtype=torch.uint8)}
     obj.image_input_shape = (1, 3, 384, 384)
     return obj
+
+
+@pytest.mark.parametrize('contract,expected', [
+    ({}, [1, 1, 2, 3, 17, 300]),
+    ({'skip_empty': True}, [0, 1, 2, 3, 17, 300]),
+    ({'static_person_batches': [1, 2, 4, 300]}, [0, 1, 2, 4, 300, 300]),
+    ({'static_person_batches': [1], 'dynamic_person_fallback': True}, [0, 1, 2, 3, 17, 300]),
+    ({'static_person_batches': [1, 4], 'dynamic_person_fallback': True}, [0, 1, 4, 4, 17, 300]),
+])
+def test_processed_counts_include_real_work_but_not_output_storage_padding(contract, expected):
+    np.testing.assert_array_equal(processed_pose_counts([0, 1, 2, 3, 17, 300], contract), expected)
+
+
+def test_fixed_batch_accounting_rejects_truncating_profile():
+    with pytest.raises(ValueError, match='exceeds'):
+        processed_pose_counts([2], {'static_person_batches': [1]})
 
 
 def test_preprocess_keeps_original_pixels_and_reference_detector_format():

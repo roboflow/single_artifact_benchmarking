@@ -34,6 +34,14 @@ The RF-Pose fixed-batch conditional prototype requires testing with 10.6:
 10.4 rejects its minimal ONNX test even with weak typing. Successful parsing
 does not by itself validate full-engine accuracy, CUDA graphs or speed.
 
+The isolated `trt1013` extra pins TensorRT 10.13.3.9 for conditional-shape
+compiler investigations. Use `UV_PROJECT_ENVIRONMENT=.venv-trt1013` with
+`--extra trt1013`; do not mix runtime extras or silently replace the 10.4/10.6
+engines. Minimal conditional/DDS graphs parse in 10.6 but can fail during
+engine construction. A newer compiler is a compatibility experiment, not
+an accuracy or speed claim; its Nano control and complete joint output
+must be revalidated before comparison.
+
 The engine cache is keyed by the ONNX, TensorRT version, GPU capability and
 build settings, with engine hashes verified on reuse. `sab.rfpose` metadata
 inside the ONNX declares the interface and checkpoint/calibration provenance.
