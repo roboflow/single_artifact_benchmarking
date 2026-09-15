@@ -63,12 +63,15 @@ def main():
         raise ValueError('same 64 det56 timing crops required')
     images, detections, grouped = load_inputs(a.image_manifest, a.detections)
     n = len(detections)
+    keypoints = previous['contract']['keypoints']
+    if keypoints not in (17, 133):
+        raise ValueError('requires a declared COCO body or WholeBody schema')
     arrays = dict(image_ids=np.array([r['id'] for r in images], np.int64),
         prediction_image_ids=np.array([r['image_id'] for r in detections], np.int64),
         boxes_xywh=np.array([r['bbox'] for r in detections], np.float64),
         detector_scores=np.array([r['score'] for r in detections], np.float32),
         source_indices=np.array([r['source_index'] for r in detections], np.int64),
-        keypoints=np.empty((n, 17, 2), np.float32), crop_scores=np.empty(n, np.float32),
+        keypoints=np.empty((n, keypoints, 2), np.float32), crop_scores=np.empty(n, np.float32),
         bucket_ids=np.empty(n, np.int32))
     torch.set_num_threads(2)
     cv2.setNumThreads(1)
