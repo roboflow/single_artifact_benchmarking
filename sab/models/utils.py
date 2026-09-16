@@ -142,24 +142,28 @@ def run_benchmark_on_artifacts(artifact_requests: list[ArtifactBenchmarkRequest]
     return results
 
 
-def pretty_print_results(results: list[dict]):
-    """
-    Prints summary runtime info plus COCO AP/AR breakdown.
+def coco_metric_layout(stats):
+    """Official COCOeval layouts, including legacy receipts without a task tag.
 
-    Assumes result['accuracy_stats'] is pycocotools COCOeval.stats with this order:
-      0: AP@[.50:.95] (area=all,   maxDets=max_dets)
-      1: AP@.50       (area=all,   maxDets=max_dets)
-      2: AP@.75       (area=all,   maxDets=max_dets)
-      3: AP@[.50:.95] (area=small, maxDets=max_dets)
-      4: AP@[.50:.95] (area=medium,maxDets=max_dets)
-      5: AP@[.50:.95] (area=large, maxDets=max_dets)
-      6: AR@[.50:.95] (area=all,   maxDets=1)
-      7: AR@[.50:.95] (area=all,   maxDets=10)
-      8: AR@[.50:.95] (area=all,   maxDets=max_dets)
-      9: AR@[.50:.95] (area=small, maxDets=max_dets)
-     10: AR@[.50:.95] (area=medium,maxDets=max_dets)
-     11: AR@[.50:.95] (area=large, maxDets=max_dets)
+    Keypoints has ten statistics: no small-object or AR@1/AR@10 entries.
+    Bbox and segmentation share a twelve-statistic layout. Reject other
+    lengths instead of silently printing incorrect labels or missing values.
     """
+    if len(stats) == 10:
+        return (('AP_m', 3), ('AP_l', 4)), (
+            ('AR', 5), ('AR50', 6), ('AR75', 7), ('AR_m', 8), ('AR_l', 9))
+    if len(stats) == 12:
+        return (('AP_s', 3), ('AP_m', 4), ('AP_l', 5)), (
+            ('AR@1', 6), ('AR@10', 7), ('AR@max_dets', 8),
+            ('AR_s', 9), ('AR_m', 10), ('AR_l', 11))
+    raise ValueError(f'Unsupported COCOeval statistics length: {len(stats)}')
+
+
+def pretty_print_results(results: list[dict]):
+    """Print runtime and task-correct COCO AP/AR; raw statistics are unchanged."""
+    # Fail before printing any table if a result uses an unknown schema.
+    for result in results:
+        coco_metric_layout(result['accuracy_stats'])
 
     def _pct(stats, idx):
         try:
@@ -190,31 +194,20 @@ def pretty_print_results(results: list[dict]):
         print(f"{model:30} {runtime:8} {'yes' if fp16 else 'no':5} "
               f"{_fmt(map50)} {_fmt(map50_95,9)} {_fmt(ap75)} {_fmt(latency,9,2)} {'yes' if throttled else 'no':>9}")
 
-    # ---------- AP breakdown (size buckets) ----------
-    print("\nAP breakdown (COCO):")
-    ap_hdr = f"{'Model':30} {'AP_s':>6} {'AP_m':>6} {'AP_l':>6}"
-    print(ap_hdr)
-    print("-" * len(ap_hdr))
-    for result in results:
-        model = result['artifact_request']['onnx_path']
-        stats = result['accuracy_stats']
-        ap_s  = _pct(stats, 3)
-        ap_m  = _pct(stats, 4)
-        ap_l  = _pct(stats, 5)
-        print(f"{model:30} {_fmt(ap_s)} {_fmt(ap_m)} {_fmt(ap_l)}")
-
-    # ---------- AR breakdown (maxDets + size buckets) ----------
-    print("\nAR breakdown (COCO):")
-    ar_hdr = f"{'Model':30} {'AR@1':>6} {'AR@10':>6} {'AR@max_dets':>13} {'AR_s':>6} {'AR_m':>6} {'AR_l':>6}"
-    print(ar_hdr)
-    print("-" * len(ar_hdr))
-    for result in results:
-        model  = result['artifact_request']['onnx_path']
-        stats  = result['accuracy_stats']
-        ar1    = _pct(stats, 6)
-        ar10   = _pct(stats, 7)
-        armax_dets  = _pct(stats, 8)
-        ar_s   = _pct(stats, 9)
-        ar_m   = _pct(stats, 10)
-        ar_l   = _pct(stats, 11)
-        print(f"{model:30} {_fmt(ar1)} {_fmt(ar10)} {_fmt(armax_dets,13)} {_fmt(ar_s)} {_fmt(ar_m)} {_fmt(ar_l)}")
+    # A batch may mix tasks; don't give keypoint recall box-maxDets labels.
+    for count, task in ((10, 'keypoints'), (12, 'bbox/segm')):
+        group = [r for r in results if len(r['accuracy_stats']) == count]
+        if not group:
+            continue
+        layout = coco_metric_layout(group[0]['accuracy_stats'])
+        for metric, columns in zip(('AP', 'AR'), layout):
+            print(f'\n{metric} breakdown (COCO {task}):')
+            widths = [max(6, len(name)) for name, _ in columns]
+            header = f"{'Model':30} " + ' '.join(
+                f'{name:>{width}}' for (name, _), width in zip(columns, widths))
+            print(header)
+            print('-' * len(header))
+            for result in group:
+                values = ' '.join(_fmt(_pct(result['accuracy_stats'], index), width)
+                                  for (_, index), width in zip(columns, widths))
+                print(f"{result['artifact_request']['onnx_path']:30} {values}")
