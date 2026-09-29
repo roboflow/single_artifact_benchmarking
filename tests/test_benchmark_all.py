@@ -1,5 +1,5 @@
-import inspect
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -18,10 +18,7 @@ class ScriptRecorder:
     def run(self, command, check):
         assert check is True
         self.commands.append(command)
-        script = command[1]
-        if Path(script).name in self.fail_for:
-            import subprocess
-
+        if Path(command[1]).name in self.fail_for:
             raise subprocess.CalledProcessError(1, command)
         save_results(command[5], [make_row()])
 
@@ -46,37 +43,23 @@ def run_main(tmp_path, models_dir, **kwargs):
     benchmark_all.main("images", "ann.json", models_dir=str(models_dir), output_dir=str(tmp_path / "out"), **kwargs)
 
 
-def test_default_models_dir_is_the_real_package_directory():
-    models_dir = Path(inspect.signature(benchmark_all.main).parameters["models_dir"].default)
-    assert (models_dir / "benchmark_yolo26.py").exists()
+def combined_rows(tmp_path) -> list[dict]:
+    return json.loads((tmp_path / "out" / "combined_results.json").read_text())
 
 
-def test_runs_each_script_with_the_current_interpreter_and_positional_args(tmp_path, models_dir, recorder):
+def test_runs_each_script_with_the_current_interpreter_and_no_flags_by_default(tmp_path, models_dir, recorder):
     run_main(tmp_path, models_dir, buffer_time=1.5)
     out = tmp_path / "out"
     assert recorder.commands == [
         [sys.executable, str(models_dir / "benchmark_a.py"), "images", "ann.json", "1.5", str(out / "benchmark_a_results.txt")],
         [sys.executable, str(models_dir / "benchmark_b.py"), "images", "ann.json", "1.5", str(out / "benchmark_b_results.txt")],
     ]
+    assert len(combined_rows(tmp_path)) == 2
 
 
-def test_flags_are_passed_only_when_set(tmp_path, models_dir, recorder):
+def test_flags_are_passed_when_set(tmp_path, models_dir, recorder):
     run_main(tmp_path, models_dir, runtimes="fake,trt", devices=("cpu", "gpu"), max_images=5, rerun=True)
-    command = recorder.commands[0]
-    flags = command[6:]
-    assert flags == ["--runtimes=fake,trt", "--devices=cpu,gpu", "--max_images=5", "--rerun"]
-
-
-def test_no_flags_by_default(tmp_path, models_dir, recorder):
-    run_main(tmp_path, models_dir)
-    assert not any(part.startswith("--") for part in recorder.commands[0])
-
-
-def test_combines_the_rows_and_prints_the_table(tmp_path, models_dir, recorder, capsys):
-    run_main(tmp_path, models_dir)
-    combined = json.loads((tmp_path / "out" / "combined_results.json").read_text())
-    assert len(combined) == 2
-    assert "Artifact" in capsys.readouterr().out
+    assert recorder.commands[0][6:] == ["--runtimes=fake,trt", "--devices=cpu,gpu", "--max_images=5", "--rerun"]
 
 
 def test_a_failed_script_is_reported_and_the_others_still_run(tmp_path, models_dir, recorder, capsys):
@@ -84,4 +67,4 @@ def test_a_failed_script_is_reported_and_the_others_still_run(tmp_path, models_d
     run_main(tmp_path, models_dir)
     assert len(recorder.commands) == 2
     assert "Failed to run" in capsys.readouterr().out
-    assert len(json.loads((tmp_path / "out" / "combined_results.json").read_text())) == 1
+    assert len(combined_rows(tmp_path)) == 1

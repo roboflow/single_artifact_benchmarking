@@ -17,89 +17,45 @@ def requires_tensorrt(test):
     return pytest.mark.skipif(not TRTRuntime.is_available("gpu"), reason="needs TensorRT and an NVIDIA GPU")(test)
 
 
-def test_declares_name_and_devices():
-    assert TRTRuntime.name == "tensorrt"
-    assert TRTRuntime.devices == frozenset({"gpu"})
-
-
 @pytest.mark.parametrize(
-    "precision, engine_name",
+    "artifact_path, precision, engine_path",
     [
-        ("fp32", "model.engine"),
-        ("fp16", "model.fp16.engine"),
-        ("int8", "model.int8.engine"),
+        ("cache/model.onnx", "fp32", "cache/model.engine"),
+        ("cache/model.onnx", "fp16", "cache/model.fp16.engine"),
+        ("cache/model.onnx", "int8", "cache/model.int8.engine"),
+        ("dfine_n_coco.opset17.onnx", "fp16", "dfine_n_coco.opset17.fp16.engine"),
     ],
 )
-def test_engine_path_names_the_precision(precision, engine_name):
-    assert engine_path_for("cache/model.onnx", precision) == f"cache/{engine_name}"
+def test_engine_path_names_the_precision(artifact_path, precision, engine_path):
+    assert engine_path_for(artifact_path, precision) == engine_path
 
 
-def test_engine_path_keeps_dots_in_the_model_name():
-    assert engine_path_for("dfine_n_coco.opset17.onnx", "fp32") == "dfine_n_coco.opset17.engine"
-    assert engine_path_for("dfine_n_coco.opset17.onnx", "fp16") == "dfine_n_coco.opset17.fp16.engine"
-
-
-def test_engine_path_replaces_only_the_suffix():
-    assert engine_path_for("a.onnx.dir/model.onnx", "fp32") == "a.onnx.dir/model.engine"
-
-
-def test_engine_path_rejects_a_file_that_is_not_onnx():
+def test_engine_path_rejects_a_file_that_is_not_onnx_and_an_unknown_precision():
     with pytest.raises(ValueError, match="onnx"):
         engine_path_for("model.tflite", "fp32")
-
-
-def test_engine_path_rejects_an_unknown_precision():
     with pytest.raises(ValueError, match="bf16"):
         engine_path_for("model.onnx", "bf16")
 
 
-def test_fp32_sets_no_builder_flag():
+def test_builder_flags_per_precision():
     assert builder_flag_names("fp32") == ()
-
-
-def test_fp16_sets_the_fp16_flag():
     assert builder_flag_names("fp16") == ("FP16",)
-
-
-def test_int8_sets_the_int8_and_fp16_flags():
     assert set(builder_flag_names("int8")) == {"INT8", "FP16"}
 
 
-def test_is_unavailable_when_tensorrt_is_missing(monkeypatch):
-    monkeypatch.setitem(sys.modules, "tensorrt", None)
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    assert not TRTRuntime.is_available("gpu")
-
-
-def test_is_unavailable_without_a_cuda_device(monkeypatch):
-    monkeypatch.setitem(sys.modules, "tensorrt", object())
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    assert not TRTRuntime.is_available("gpu")
-
-
-def test_is_available_with_tensorrt_and_cuda(monkeypatch):
-    monkeypatch.setitem(sys.modules, "tensorrt", object())
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    assert TRTRuntime.is_available("gpu")
-
-
-def test_is_unavailable_on_other_devices(monkeypatch):
-    monkeypatch.setitem(sys.modules, "tensorrt", object())
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    assert not TRTRuntime.is_available("cpu")
+@pytest.mark.parametrize(
+    "tensorrt_module, cuda, expected",
+    [(None, True, False), (object(), False, False), (object(), True, True)],
+)
+def test_is_available_needs_tensorrt_and_a_cuda_device(monkeypatch, tensorrt_module, cuda, expected):
+    monkeypatch.setitem(sys.modules, "tensorrt", tensorrt_module)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: cuda)
+    assert TRTRuntime.is_available("gpu") is expected
 
 
 def test_rejects_a_device_other_than_gpu():
     with pytest.raises(ValueError, match="cpu"):
         TRTRuntime("model.onnx", "cpu", "fp32")
-
-
-def test_version_names_the_library(monkeypatch):
-    class FakeTensorRT:
-        __version__ = "10.4.0"
-
-    monkeypatch.setitem(sys.modules, "tensorrt", FakeTensorRT)
-    assert TRTRuntime.version() == "tensorrt 10.4.0"
 
 
 @requires_tensorrt

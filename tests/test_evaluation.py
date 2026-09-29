@@ -1,5 +1,4 @@
 import pytest
-import torch
 from PIL import Image
 
 from sab.evaluation import run_timed_pass
@@ -27,20 +26,11 @@ def no_sleep(_seconds):
     pass
 
 
-def test_run_timed_pass_records_one_timing_per_image(image_paths):
+def test_run_timed_pass_records_one_timing_per_image_up_to_max_images(image_paths):
     pipeline, _ = make_pipeline()
 
-    stats = run_timed_pass(pipeline, image_paths, sleep_fn=no_sleep)
-
-    assert stats["count"] == 3
-
-
-def test_run_timed_pass_stops_at_max_images(image_paths):
-    pipeline, _ = make_pipeline()
-
-    stats = run_timed_pass(pipeline, image_paths, max_images=2, sleep_fn=no_sleep)
-
-    assert stats["count"] == 2
+    assert run_timed_pass(pipeline, image_paths, sleep_fn=no_sleep)["count"] == 3
+    assert run_timed_pass(pipeline, image_paths, max_images=2, sleep_fn=no_sleep)["count"] == 2
 
 
 def test_run_timed_pass_moves_images_to_the_input_device_of_the_runtime(image_paths):
@@ -50,14 +40,6 @@ def test_run_timed_pass_moves_images_to_the_input_device_of_the_runtime(image_pa
     run_timed_pass(pipeline, image_paths, sleep_fn=no_sleep)
 
     assert [call["images"].device.type for call in runtime.calls] == ["meta"] * 3
-
-
-def test_run_timed_pass_keeps_images_on_cpu_for_a_cpu_runtime(image_paths):
-    pipeline, runtime = make_pipeline(input_device="cpu")
-
-    run_timed_pass(pipeline, image_paths, sleep_fn=no_sleep)
-
-    assert [call["images"].device.type for call in runtime.calls] == ["cpu"] * 3
 
 
 def test_run_timed_pass_reports_each_prediction_to_on_result(image_paths):

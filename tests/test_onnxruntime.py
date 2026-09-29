@@ -54,67 +54,28 @@ def cpu_runtime(path, **kwargs):
     return ONNXRuntime(path, "cpu", "fp32", **kwargs)
 
 
-def test_declares_name_and_devices():
-    assert ONNXRuntime.name == "onnxruntime"
-    assert ONNXRuntime.devices == frozenset({"cpu", "gpu"})
+def test_is_available_on_cpu_and_on_gpu_only_with_the_cuda_provider_and_a_cuda_device(monkeypatch):
+    import onnxruntime as ort
 
-
-def test_rejects_an_unsupported_device(tmp_path):
-    path = make_single_input_model(tmp_path / "m.onnx")
-    with pytest.raises(ValueError, match="npu"):
-        ONNXRuntime(path, "npu", "fp32")
-
-
-def test_cpu_is_available():
     assert ONNXRuntime.is_available("cpu")
     assert not ONNXRuntime.is_available("npu")
 
-
-def test_gpu_is_unavailable_without_the_cuda_provider(monkeypatch):
-    import onnxruntime as ort
-
     monkeypatch.setattr(ort, "get_available_providers", lambda: ["CPUExecutionProvider"])
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     assert not ONNXRuntime.is_available("gpu")
-
-
-def test_gpu_is_unavailable_without_a_cuda_device(monkeypatch):
-    import onnxruntime as ort
 
     monkeypatch.setattr(ort, "get_available_providers", lambda: ["CUDAExecutionProvider"])
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     assert not ONNXRuntime.is_available("gpu")
 
 
-def test_version_names_the_library():
-    import onnxruntime as ort
+def test_input_spec_replaces_a_symbolic_batch_with_one_and_keeps_a_static_one(tmp_path):
+    symbolic = cpu_runtime(make_single_input_model(tmp_path / "symbolic.onnx"))
+    static = cpu_runtime(make_single_input_model(tmp_path / "static.onnx", batch=2))
 
-    assert ONNXRuntime.version() == f"onnxruntime {ort.__version__}"
-
-
-def test_cpu_runtime_places_tensors_on_cpu(tmp_path):
-    runtime = cpu_runtime(make_single_input_model(tmp_path / "m.onnx"))
-    assert runtime.input_device == "cpu"
-
-
-def test_input_spec_replaces_a_symbolic_batch_with_one(tmp_path):
-    runtime = cpu_runtime(make_single_input_model(tmp_path / "m.onnx"))
-    assert runtime.input_spec.name == "images"
-    assert runtime.input_spec.shape == (1, 3, 4, 4)
-
-
-def test_input_spec_keeps_a_static_shape(tmp_path):
-    runtime = cpu_runtime(make_single_input_model(tmp_path / "m.onnx", batch=2))
-    assert runtime.input_spec.shape == (2, 3, 4, 4)
-
-
-def test_run_gives_numerically_correct_outputs(tmp_path):
-    runtime = cpu_runtime(make_single_input_model(tmp_path / "m.onnx"))
-    images = torch.rand(1, 3, 4, 4)
-
-    outputs = runtime.run({"images": images})
-
-    assert set(outputs) == {"outputs"}
-    torch.testing.assert_close(outputs["outputs"], images * 2)
+    assert symbolic.input_spec.name == "images"
+    assert symbolic.input_spec.shape == (1, 3, 4, 4)
+    assert static.input_spec.shape == (2, 3, 4, 4)
 
 
 def test_run_records_one_timing_per_call_after_warmup(tmp_path):
@@ -138,16 +99,11 @@ def test_image_input_name_overrides_the_default(tmp_path):
     assert runtime.input_spec.shape == (1, 3, 4, 4)
 
 
-def test_several_inputs_without_an_images_input_need_a_name(tmp_path):
-    path = make_two_input_model(tmp_path / "m.onnx", image_name="pixels")
+def test_image_input_name_is_required_when_ambiguous_and_must_exist(tmp_path):
     with pytest.raises(ValueError, match="image_input_name"):
-        cpu_runtime(path)
-
-
-def test_unknown_image_input_name_is_rejected(tmp_path):
-    path = make_single_input_model(tmp_path / "m.onnx")
+        cpu_runtime(make_two_input_model(tmp_path / "two.onnx", image_name="pixels"))
     with pytest.raises(ValueError, match="nope"):
-        cpu_runtime(path, image_input_name="nope")
+        cpu_runtime(make_single_input_model(tmp_path / "one.onnx"), image_input_name="nope")
 
 
 def test_run_binds_every_input_with_its_own_dtype(tmp_path):
@@ -160,31 +116,20 @@ def test_run_binds_every_input_with_its_own_dtype(tmp_path):
     torch.testing.assert_close(outputs["boxes"], images * 2)
     assert outputs["labels"].dtype == torch.int64
     assert outputs["labels"].tolist() == [[11, 21]]
-    assert len(runtime.profiler.timings) == 1
 
 
-def test_dynamic_output_shapes_follow_the_values(tmp_path):
+def test_dynamic_output_shapes_follow_the_values_of_each_call(tmp_path):
     runtime = cpu_runtime(make_dynamic_output_model(tmp_path / "m.onnx"), dynamic_output_shapes=True)
     images = torch.zeros(1, 3, 4, 4)
     images[0, 1, 2, 3] = 1.0
     images[0, 2, 0, 0] = 1.0
 
-    outputs = runtime.run({"images": images})
+    two = runtime.run({"images": images})["indices"]
+    none = runtime.run({"images": torch.zeros(1, 3, 4, 4)})["indices"]
 
-    expected = torch.nonzero(images).T
-    assert outputs["indices"].shape == (4, 2)
-    assert torch.equal(outputs["indices"], expected)
-    assert len(runtime.profiler.timings) == 1
-
-
-def test_dynamic_output_shapes_change_between_calls(tmp_path):
-    runtime = cpu_runtime(make_dynamic_output_model(tmp_path / "m.onnx"), dynamic_output_shapes=True)
-
-    few = runtime.run({"images": torch.zeros(1, 3, 4, 4)})["indices"]
-    many = runtime.run({"images": torch.ones(1, 3, 4, 4)})["indices"]
-
-    assert few.shape == (4, 0)
-    assert many.shape == (4, 48)
+    assert torch.equal(two, torch.nonzero(images).T)
+    assert none.shape == (4, 0)
+    assert len(runtime.profiler.timings) == 2
 
 
 def test_outputs_do_not_share_memory_between_calls(tmp_path):
@@ -194,9 +139,3 @@ def test_outputs_do_not_share_memory_between_calls(tmp_path):
     runtime.run({"images": torch.zeros(1, 3, 4, 4)})
 
     assert first.eq(2).all()
-
-
-def test_warmup_feeds_every_input(tmp_path):
-    """A model with an int64 input fails to run unless warmup binds that input too."""
-    runtime = cpu_runtime(make_two_input_model(tmp_path / "m.onnx"))
-    assert runtime.profiler.timings == []

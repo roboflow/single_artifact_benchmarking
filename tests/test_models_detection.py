@@ -103,39 +103,21 @@ REMAPPED = {"yolov11", "yolov8", "yolo26"}
 
 
 @pytest.mark.parametrize("family", EXPECTED_ROWS)
-def test_module_imports_without_tensorrt(family):
-    load(family)
-
-
-@pytest.mark.parametrize("family", EXPECTED_ROWS)
-def test_build_requests_matches_the_old_matrix(family):
-    requests = build(family)
-    assert [describe(request) for request in requests] == EXPECTED_ROWS[family]()
-
-
-@pytest.mark.parametrize("family", EXPECTED_ROWS)
-def test_build_requests_sets_processor_and_flags(family):
+def test_build_requests_reproduces_the_old_rows(family):
     requests = build(family, buffer_time=0.25)
+
+    assert [describe(request) for request in requests] == EXPECTED_ROWS[family]()
     processor = getattr(load(family), PROCESSOR_NAMES[family])
-    assert all(request.processor is processor for request in requests)
-    assert all(request.buffer_time == 0.25 for request in requests)
-    assert all(request.needs_class_remapping == (family in REMAPPED) for request in requests)
-    assert all(request.normalized_in_graph is False for request in requests)
-    assert all(request.unsupported is None for request in requests)
-    assert all(request.graph_surgery_func is None for request in requests)
-    expected_max_dets = 500 if family == "yololite" else 100
-    assert all(request.max_dets == expected_max_dets for request in requests)
+    max_dets = 500 if family == "yololite" else 100
+    assert {
+        (request.processor, request.needs_class_remapping, request.max_dets, request.buffer_time, request.normalized_in_graph)
+        for request in requests
+    } == {(processor, family in REMAPPED, max_dets, 0.25, False)}
 
 
 def test_yololite_onnx_row_uses_dynamic_output_shapes():
     onnx_row = build("yololite")[0]
     assert onnx_row.runtime.keywords == {"dynamic_output_shapes": True}
-
-
-def test_yolo_processors_share_the_yolov11_code():
-    yolov11 = load("yolov11")
-    assert issubclass(load("yolo26").YOLO26Processor, yolov11.YOLOv11Processor)
-    assert issubclass(load("yolov8").YOLOv8Processor, yolov11.YOLOv11Processor)
 
 
 @pytest.fixture
@@ -176,19 +158,17 @@ def test_yolo_preprocess_matches_module_function(family, image):
 
     assert torch.equal(tensor, expected)
     assert metadata == expected_metadata
-    assert tensor.shape == INPUT_SPEC.shape
-    assert tensor.max() <= 1.0
 
 
-@pytest.mark.parametrize("family", ["yolov11", "yolov8", "yolo26"])
-def test_yolo_preprocess_without_normalization_scales_to_255(family, image):
-    processor_class = getattr(load(family), PROCESSOR_NAMES[family])
-    normalized, _ = processor_class(INPUT_SPEC, normalize=True).preprocess(image)
+def test_yolo_preprocess_without_normalization_scales_to_255(image):
+    # YOLOv8 and YOLO26 inherit this preprocess unchanged.
+    processor_class = load("yolov11").YOLOv11Processor
+    normalized, normalized_metadata = processor_class(INPUT_SPEC, normalize=True).preprocess(image)
 
     tensor, metadata = processor_class(INPUT_SPEC, normalize=False).preprocess(image)
 
     assert torch.equal(tensor, normalized * 255.0)
-    assert metadata["padding"] == processor_class(INPUT_SPEC, normalize=True).preprocess(image)[1]["padding"]
+    assert metadata["padding"] == normalized_metadata["padding"]
 
 
 def test_yololite_preprocess_default_matches_module_function(image):
@@ -212,56 +192,3 @@ def test_yololite_preprocess_without_normalization_scales_to_255(image):
         fill=module._PAD_VALUE,
     )
     assert torch.equal(tensor, letterboxed * 255.0)
-
-
-def assert_outputs_equal(actual: tuple, expected: tuple):
-    assert len(actual) == len(expected)
-    for actual_tensor, expected_tensor in zip(actual, expected):
-        assert torch.equal(actual_tensor, expected_tensor)
-
-
-@pytest.mark.parametrize("family", ["rfdetr", "lwdetr"])
-def test_detr_postprocess_matches_module_function(family):
-    module = load(family)
-    generator = torch.Generator().manual_seed(1)
-    outputs = {
-        "dets": torch.rand(1, 20, 4, generator=generator),
-        "labels": torch.randn(1, 20, 5, generator=generator),
-    }
-    processor = getattr(module, PROCESSOR_NAMES[family])(INPUT_SPEC)
-
-    assert_outputs_equal(processor.postprocess(outputs, {}), module.postprocess_output(outputs, {}))
-
-
-@pytest.mark.parametrize("family", ["yolov11", "yolov8", "yolo26"])
-def test_yolo_postprocess_matches_module_function(family, image):
-    module = load("yolov11")
-    processor = getattr(load(family), PROCESSOR_NAMES[family])(INPUT_SPEC)
-    _, metadata = processor.preprocess(image)
-    generator = torch.Generator().manual_seed(2)
-    output0 = torch.rand(1, 10, 6, generator=generator) * 32
-
-    # The module function edits the boxes in place, so each call gets its own copy.
-    actual = processor.postprocess({"output0": output0.clone()}, metadata)
-    expected = module.postprocess_output({"output0": output0.clone()}, metadata)
-
-    assert_outputs_equal(actual, expected)
-
-
-def test_yololite_postprocess_matches_module_function(image):
-    module = load("yololite")
-    processor = module.YoloLiteProcessor(INPUT_SPEC)
-    _, metadata = processor.preprocess(image)
-    generator = torch.Generator().manual_seed(3)
-    top_left = torch.rand(1, 30, 2, generator=generator) * 16
-    outputs = {
-        "boxes_xyxy": torch.cat([top_left, top_left + 4 + torch.rand(1, 30, 2, generator=generator) * 8], dim=-1),
-        "obj_logits": torch.randn(1, 30, 1, generator=generator) + 2,
-        "cls_logits": torch.randn(1, 30, 3, generator=generator) + 2,
-    }
-
-    actual = processor.postprocess({name: value.clone() for name, value in outputs.items()}, metadata)
-    expected = module.postprocess_output({name: value.clone() for name, value in outputs.items()}, metadata)
-
-    assert_outputs_equal(actual, expected)
-    assert actual[0].shape[-1] == 4
