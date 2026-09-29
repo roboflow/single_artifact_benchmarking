@@ -52,11 +52,12 @@ Other hosts install the extra for each runtime they need:
 | Extra | Adds | Host |
 |---|---|---|
 | `openvino` | `OpenVINORuntime` | Any CPU host. |
+| `executorch` | `ExecuTorchRuntime` | Any CPU host. |
 
 The `nvidia` extra now includes `openvino`, so `benchmark_all` also runs the OpenVINO CPU rows. These rows take most of the run time. To run only the TensorRT and ONNX Runtime rows, add `--runtimes=tensorrt,onnxruntime`.
 
 ```bash
-uv sync --python 3.12 --extra openvino
+uv sync --python 3.12 --extra openvino --extra executorch
 ```
 
 ### Options
@@ -84,6 +85,7 @@ Each runtime times the smallest call that runs the full graph. Preprocessing and
 | ONNX Runtime (GPU) | `run_with_iobinding` | Not included. IOBinding binds GPU buffers. |
 | ONNX Runtime (CPU) | `run_with_iobinding` | None (CPU). |
 | OpenVINO | `InferRequest.infer()` | None (CPU). |
+| ExecuTorch | `Method.execute()` | None (CPU). |
 
 OpenVINO rows read the existing `.onnx` files and compile them on the host, as TensorRT rows do. They set `INFERENCE_PRECISION_HINT` from the precision of the row. On a CPU with no native fp16, the fp16 rows are skipped, because OpenVINO compiles them in f32.
 
