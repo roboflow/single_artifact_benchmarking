@@ -9,6 +9,7 @@ from sab.request import ArtifactBenchmarkRequest
 from sab.results import pretty_print_results
 from sab.runner import run_benchmark_on_artifacts
 from sab.runtimes.onnxruntime import ONNXRuntime
+from sab.runtimes.openvino import OpenVINORuntime
 from sab.runtimes.tensorrt import TRTRuntime
 
 TRT_WITHOUT_CUDA_GRAPH = partial(TRTRuntime, use_cuda_graph=False)
@@ -96,7 +97,7 @@ class YOLOv11Processor(Processor):
 
 
 def build_requests(buffer_time: float = 0.0) -> list[ArtifactBenchmarkRequest]:
-    return [
+    onnx_rows = [
         request
         for size in ("n", "s", "m", "l", "x")
         for request in (
@@ -129,6 +130,20 @@ def build_requests(buffer_time: float = 0.0) -> list[ArtifactBenchmarkRequest]:
             ),
         )
     ]
+    openvino_rows = [
+        ArtifactBenchmarkRequest(
+            artifact_path=f"yolo11{size}_nms_conf_0.01.onnx",
+            runtime=OpenVINORuntime,
+            processor=YOLOv11Processor,
+            device="cpu",
+            precision=precision,
+            buffer_time=buffer_time,
+            needs_class_remapping=True,
+        )
+        for size in ("n", "s", "m", "l", "x")
+        for precision in ("fp32", "fp16")
+    ]
+    return onnx_rows + openvino_rows
 
 
 def main(

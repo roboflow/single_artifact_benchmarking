@@ -106,7 +106,9 @@ REMAPPED = {"yolov11", "yolov8", "yolo26"}
 def test_build_requests_reproduces_the_old_rows(family):
     requests = build(family, buffer_time=0.25)
 
-    assert [describe(request) for request in requests] == EXPECTED_ROWS[family]()
+    expected = EXPECTED_ROWS[family]()
+
+    assert [describe(request) for request in requests[: len(expected)]] == expected
     processor = getattr(load(family), PROCESSOR_NAMES[family])
     max_dets = 500 if family == "yololite" else 100
     assert {

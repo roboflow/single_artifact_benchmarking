@@ -18,6 +18,6 @@ jobs:
         with:
           enable-cache: true
       - name: Install
-        run: uv sync --python 3.12 --extra onnx-cpu --group dev
+        run: uv sync --python 3.12 --extra onnx-cpu --extra openvino --group dev
       - name: Test
         run: uv run pytest -q

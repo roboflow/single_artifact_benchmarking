@@ -9,7 +9,7 @@ from sab.monitors import select_monitor
 from sab.processors import Pipeline
 from sab.request import ArtifactBenchmarkRequest
 from sab.results import load_results, result_key, save_results
-from sab.runtimes.base import runtime_class
+from sab.runtimes.base import UnavailableOnHost, runtime_class
 
 
 def parse_filter(value: str | Iterable[str] | None) -> set[str] | None:
@@ -139,7 +139,11 @@ def run_benchmark_on_artifacts(
             rows.append(stored_rows[stored_index[key]])
             continue
 
-        row = run_benchmark_on_artifact(request, images_dir, annotations_file_path)
+        try:
+            row = run_benchmark_on_artifact(request, images_dir, annotations_file_path)
+        except UnavailableOnHost as reason:
+            print(f"Skipping {request.artifact_path} ({request.runtime_name}, {request.device}, {request.precision}): {reason}.")
+            continue
         print(row)
         store(row)
         rows.append(row)

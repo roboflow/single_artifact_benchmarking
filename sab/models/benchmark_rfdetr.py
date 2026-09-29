@@ -8,6 +8,7 @@ from sab.request import ArtifactBenchmarkRequest
 from sab.results import pretty_print_results
 from sab.runner import run_benchmark_on_artifacts
 from sab.runtimes.onnxruntime import ONNXRuntime
+from sab.runtimes.openvino import OpenVINORuntime
 from sab.runtimes.tensorrt import TRTRuntime
 
 
@@ -53,7 +54,7 @@ class RFDETRProcessor(Processor):
 
 
 def build_requests(buffer_time: float = 0.0) -> list[ArtifactBenchmarkRequest]:
-    return [
+    onnx_rows = [
         request
         for size in ("nano", "small", "medium")
         for request in (
@@ -83,6 +84,19 @@ def build_requests(buffer_time: float = 0.0) -> list[ArtifactBenchmarkRequest]:
             ),
         )
     ]
+    openvino_rows = [
+        ArtifactBenchmarkRequest(
+            artifact_path=f"rf-detr-{size}.onnx",
+            runtime=OpenVINORuntime,
+            processor=RFDETRProcessor,
+            device="cpu",
+            precision=precision,
+            buffer_time=buffer_time,
+        )
+        for size in ("nano", "small", "medium")
+        for precision in ("fp32", "fp16")
+    ]
+    return onnx_rows + openvino_rows
 
 
 def main(

@@ -19,6 +19,10 @@ class InputSpec:
     shape: tuple[int, ...]
 
 
+class UnavailableOnHost(RuntimeError):
+    """The artifact loaded, but this host cannot run the row as requested. The runner skips the row."""
+
+
 def pick_image_input(input_names: list[str], image_input_name: str | None) -> str:
     """The name of the image input: the given name, the only input, or the input named "images"."""
     if image_input_name is not None:
