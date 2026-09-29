@@ -9,8 +9,6 @@ import time
 from contextlib import nullcontext
 from typing import Callable
 
-from sab.onnx_inference import ONNXInferenceCPU
-
 
 def _load_coco_tools():
     """Import the COCO stack on the mAP path only.
@@ -45,14 +43,14 @@ def run_timed_pass(
     `inference.profiler.timings` after the call if you need the series.
 
     Args:
-        inference: one of SAB's inference classes (TRTInference, ONNXInferenceCUDA,
-            or ONNXInferenceCPU subclasses). Input device placement keys on the
-            concrete class: everything except ONNXInferenceCPU gets .cuda() inputs.
+        inference: a `Pipeline`, or any object with `infer`, `profiler`,
+            `prediction_type` and `input_device`. Each image moves to `input_device`
+            (a torch device string such as "cpu" or "cuda") before `infer`.
         image_paths: images to run, in order
         buffer_time: seconds to sleep after each image, to let the GPU cool
         max_images: run only the first N images
         monitor: optional context manager to hold open for the pass, such as a
-            ThrottleMonitor or a CPUFrequencyMonitor. Read its verdict after the call.
+            ThrottleMonitor or a CpufreqMonitor. Read its verdict after the call.
         on_result: called with (index, initial_shape, (xyxy, class_id, score, masks))
             for each image, before the buffer sleep. Lets a caller layer accumulation
             on top of the loop without changing what is timed.
@@ -72,8 +70,7 @@ def run_timed_pass(
             image = Image.open(image_path).convert("RGB")
             initial_shape = image.size
             image = TF.to_tensor(image)
-            if not isinstance(inference, ONNXInferenceCPU):
-                image = image.cuda()
+            image = image.to(inference.input_device)
 
             if inference.prediction_type == "bbox":
                 xyxy, class_id, score = inference.infer(image)

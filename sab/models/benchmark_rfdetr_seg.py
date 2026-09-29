@@ -1,30 +1,28 @@
-import torch
-import torchvision.transforms.functional as TF
-import torch.nn.functional as F
-from PIL import Image
-import numpy as np
-import io
-import requests
-import os
-import json
 import fire
+import torch
+import torch.nn.functional as F
+import torchvision.transforms.functional as TF
+
+from sab.models.utils import cxcywh_to_xyxy
+from sab.processors import Processor
+from sab.request import ArtifactBenchmarkRequest
+from sab.results import pretty_print_results
+from sab.runner import run_benchmark_on_artifacts
 
 
-from sab.onnx_inference import ONNXInferenceCUDA
-from sab.trt_inference import TRTInference
-from sab.models.utils import cxcywh_to_xyxy, ArtifactBenchmarkRequest, run_benchmark_on_artifacts, pretty_print_results
-
-
-def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) -> tuple[torch.Tensor, dict]:
+def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int], normalize: bool = True) -> tuple[torch.Tensor, dict]:
     if len(image.shape) == 3:
         image = image.unsqueeze(0)
     
     orig_target_sizes = torch.tensor([image.shape[2], image.shape[3]], device=image.device)
     
-    means = torch.tensor([0.485, 0.456, 0.406], device=image.device).view(1, 3, 1, 1)
-    stds = torch.tensor([0.229, 0.224, 0.225], device=image.device).view(1, 3, 1, 1)
+    if normalize:
+        means = torch.tensor([0.485, 0.456, 0.406], device=image.device).view(1, 3, 1, 1)
+        stds = torch.tensor([0.229, 0.224, 0.225], device=image.device).view(1, 3, 1, 1)
 
-    image = TF.normalize(image, means, stds)
+        image = TF.normalize(image, means, stds)
+    else:
+        image = image * 255.0
     image = TF.resize(image, image_input_shape[2:])
 
     return image, {
@@ -56,48 +54,39 @@ def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict) -> tupl
     return bboxes.contiguous(), labels.contiguous(), scores.contiguous(), masks.contiguous()
 
 
-class RFDETRSegONNXInference(ONNXInferenceCUDA):
-    def __init__(self, model_path: str, image_input_name: str|None=None):
-        super().__init__(model_path, image_input_name, prediction_type="segm")
+class RFDETRSegProcessor(Processor):
+    prediction_type = "segm"
 
-    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
-        return preprocess_image(input_image, self.image_input_shape)
-    
+    def preprocess(self, image: torch.Tensor) -> tuple[torch.Tensor, dict]:
+        return preprocess_image(image, self.input_spec.shape, self.normalize)
+
     def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         return postprocess_output(outputs, metadata)
 
 
-class RFDETRSegTRTInference(TRTInference):
-    def __init__(self, model_path: str, image_input_name: str|None=None):
-        super().__init__(model_path, image_input_name, use_cuda_graph=True, prediction_type="segm")
+def build_requests(buffer_time: float = 0.0) -> list[ArtifactBenchmarkRequest]:
+    return []
 
-    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
-        return preprocess_image(input_image, self.image_input_shape)
-    
-    def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        return postprocess_output(outputs, metadata)
-
-class NoCudaGraphRFDETRSegTRTInference(TRTInference):
-    def __init__(self, model_path: str, image_input_name: str|None=None):
-        super().__init__(model_path, image_input_name, use_cuda_graph=False, prediction_type="segm")
-
-    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
-        return preprocess_image(input_image, self.image_input_shape)
-    
-    def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        return postprocess_output(outputs, metadata)
-
-
-def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, output_file_name: str = "rfdetr_seg_results.json"):
-    requests = [
-    ]
-
-    results = run_benchmark_on_artifacts(requests, image_dir, annotations_file_path)
-
-    print(f"Saving results to {output_file_name}")
-    with open(output_file_name, "w") as f:
-        json.dump(results, f)
-    
+def main(
+    image_dir: str,
+    annotations_file_path: str,
+    buffer_time: float = 0.0,
+    output_file_name: str = "rfdetr_seg_results.json",
+    runtimes: str | None = None,
+    devices: str | None = None,
+    max_images: int | None = None,
+    rerun: bool = False,
+):
+    results = run_benchmark_on_artifacts(
+        build_requests(buffer_time),
+        image_dir,
+        annotations_file_path,
+        output_file=output_file_name,
+        runtimes=runtimes,
+        devices=devices,
+        max_images=max_images,
+        rerun=rerun,
+    )
     pretty_print_results(results)
 
 
