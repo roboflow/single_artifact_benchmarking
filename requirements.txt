@@ -9,3 +9,5 @@ fire==0.7.0
 faster-coco-eval==1.6.7
 opencv-python==4.10.0.84
 onnx==1.18.0
+requests==2.32.3
+tqdm==4.67.1

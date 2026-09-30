@@ -39,13 +39,21 @@ def preprocess_image(image: torch.Tensor, image_input_shape):
     }
 
 
-def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict):
-    """Match upstream's two bilinear resizes before argmax, without resizing GT."""
+def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict, background_channel: bool = False):
+    """Match upstream's two bilinear resizes before argmax, without resizing GT.
+
+    ``background_channel``: the artifact has an extra background logit at channel 0 (rf-detr-internal exports
+    [1,151,H,W]: background + the 150 ADE20K classes). ADE20K has no background label, so the channel is dropped
+    and the argmax runs over the 150 classes.
+    """
     if len(outputs) != 1:
         raise ValueError("Expected one final-stage RF-DETR semantic logits output")
     logits = next(iter(outputs.values()))
-    if logits.ndim != 4 or logits.shape[:2] != (1, ADE20K_CONFIG.num_classes):
-        raise ValueError(f"Expected [1,150,H,W] semantic logits, got {tuple(logits.shape)}")
+    expected_channels = ADE20K_CONFIG.num_classes + int(background_channel)
+    if logits.ndim != 4 or logits.shape[:2] != (1, expected_channels):
+        raise ValueError(f"Expected [1,{expected_channels},H,W] semantic logits, got {tuple(logits.shape)}")
+    if background_channel:
+        logits = logits[:, 1:]
     if not logits.is_floating_point():
         raise ValueError("RF-DETR semantic output must contain floating-point logits")
     if not torch.isfinite(logits).all():
@@ -58,11 +66,13 @@ def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict):
 
 
 class _RFDETRSemanticAdapter:
+    background_channel = False
+
     def preprocess(self, input_image):
         return preprocess_image(input_image, self.image_input_shape)
 
     def postprocess(self, outputs, metadata):
-        return postprocess_output(outputs, metadata)
+        return postprocess_output(outputs, metadata, self.background_channel)
 
 
 class RFDETRSemanticTRTInference(_RFDETRSemanticAdapter, TRTInference):
@@ -80,18 +90,38 @@ class RFDETRSemanticONNXCPUInference(_RFDETRSemanticAdapter, ONNXInferenceCPU):
         super().__init__(model_path, image_input_name, prediction_type="semantic")
 
 
+class RFDETRInternalSemanticTRTInference(RFDETRSemanticTRTInference):
+    """rf-detr-internal semantic export: [1,151,H,W] logits with background at channel 0."""
+
+    background_channel = True
+
+
+class RFDETRInternalSemanticONNXInference(RFDETRSemanticONNXInference):
+    background_channel = True
+
+
+class RFDETRInternalSemanticONNXCPUInference(RFDETRSemanticONNXCPUInference):
+    background_channel = True
+
+
 def main(image_dir: str, mask_dir: str, buffer_time: float = 0.2,
          output_file_name: str = "rfdetr_semantic_results.json",
          onnx_path: str = "rf-detr-semseg-nano-ade20k-best-ema.onnx",
-         runtime: str = "trt", fp16: bool | None = None, max_images: int | None = None):
+         runtime: str = "trt", fp16: bool | None = None, max_images: int | None = None,
+         background_channel: bool = False):
     """Benchmark a static RF-DETR semantic ONNX export on raw ADE20K masks.
 
     Uses original-resolution labels, a 150-class global confusion matrix and
     the upstream two-stage logit resize. Omit max_images for the full split.
     Latency measures artifact execution; external resize and argmax are excluded.
+    Pass background_channel for rf-detr-internal exports ([1,151,H,W], background first).
     """
-    runtimes = {"trt": RFDETRSemanticTRTInference, "onnx-cuda": RFDETRSemanticONNXInference,
-                "onnx-cpu": RFDETRSemanticONNXCPUInference}
+    if background_channel:
+        runtimes = {"trt": RFDETRInternalSemanticTRTInference, "onnx-cuda": RFDETRInternalSemanticONNXInference,
+                    "onnx-cpu": RFDETRInternalSemanticONNXCPUInference}
+    else:
+        runtimes = {"trt": RFDETRSemanticTRTInference, "onnx-cuda": RFDETRSemanticONNXInference,
+                    "onnx-cpu": RFDETRSemanticONNXCPUInference}
     if runtime not in runtimes:
         raise ValueError(f"runtime must be one of {', '.join(runtimes)}")
     if fp16 is None:
