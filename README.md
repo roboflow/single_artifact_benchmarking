@@ -53,7 +53,7 @@ Other hosts install the extra for each runtime they need:
 |---|---|---|
 | `openvino` | `OpenVINORuntime` | Any CPU host. |
 
-The `nvidia` extra now includes `openvino`.
+The `nvidia` extra now includes `openvino`, so `benchmark_all` also runs the OpenVINO CPU rows. These rows take most of the run time. To run only the TensorRT and ONNX Runtime rows, add `--runtimes=tensorrt,onnxruntime`.
 
 ```bash
 uv sync --python 3.12 --extra openvino
