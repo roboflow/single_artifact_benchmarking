@@ -9,12 +9,10 @@ import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from PIL import Image
 
-from sab.clock_watch import ThrottleMonitor
-from sab.evaluation import run_timed_pass
 from sab.models.utils import ArtifactBenchmarkRequest, pretty_print_results, run_benchmark_on_artifacts
 from sab.onnx_inference import ONNXInferenceCPU, ONNXInferenceCUDA
 from sab.semantic_evaluation import ADE20K_CONFIG, semantic_image_pairs
-from sab.trt_inference import TRTInference, build_engine
+from sab.trt_inference import TRTInference
 
 
 def preprocess_image(image: torch.Tensor, image_input_shape):
@@ -106,64 +104,18 @@ class RFDETRInternalSemanticONNXCPUInference(RFDETRSemanticONNXCPUInference):
     background_channel = True
 
 
-class RFDETRInternalSemanticLatencyTRTInference(RFDETRInternalSemanticTRTInference):
-    """Latency-only runs: postprocess returns the raw logits instead of resizing them and taking the argmax.
-
-    The two full-resolution resizes of 151-channel logits and the argmax run on the GPU between timed calls. Timing
-    excludes them, but on a T4 they keep the GPU at its 70 W power cap, which throttles the clocks for the timed
-    calls too. Without accuracy there is no reason to run them.
-    """
-
-    def postprocess(self, outputs, metadata):
-        return next(iter(outputs.values()))
-
-
-def run_latency_only(onnx_path: str, image_dir: str, buffer_time: float, max_images: int | None) -> dict:
-    """Time an rf-detr-internal semantic artifact (TensorRT FP16, CUDA graphs) on images, without scoring them."""
-    engine_path = onnx_path.replace(".onnx", ".fp16.engine")
-    with ThrottleMonitor() as build_monitor:
-        build_engine(onnx_path, engine_path, use_fp16=True)
-    if build_monitor.did_throttle():
-        print("GPU throttled during engine build. This is expected and is a limitation of TensorRT.")
-    inference = RFDETRInternalSemanticLatencyTRTInference(engine_path)
-    images = [str(path) for path, _ in semantic_image_pairs(image_dir, image_dir.replace("images", "annotations"), max_images)]
-    with ThrottleMonitor() as monitor:
-        latency_stats = run_timed_pass(inference, images, buffer_time=buffer_time)
-    throttled = monitor.did_throttle()
-    print("🔴  GPU throttled, latency results are unreliable." if throttled
-          else "GPU did not throttle during evaluation. Latency numbers should be reliable.")
-    request = ArtifactBenchmarkRequest(
-        onnx_path=onnx_path, inference_class=RFDETRInternalSemanticLatencyTRTInference, needs_fp16=True,
-        buffer_time=buffer_time, max_images=max_images,
-    )
-    return {"artifact_request": request.dump(), "accuracy_stats": None, "latency_stats": latency_stats,
-            "throttled": throttled}
-
-
 def main(image_dir: str, mask_dir: str, buffer_time: float = 0.2,
          output_file_name: str = "rfdetr_semantic_results.json",
          onnx_path: str = "rf-detr-semseg-nano-ade20k-best-ema.onnx",
          runtime: str = "trt", fp16: bool | None = None, max_images: int | None = None,
-         background_channel: bool = False, latency_only: bool = False):
+         background_channel: bool = False):
     """Benchmark a static RF-DETR semantic ONNX export on raw ADE20K masks.
 
     Uses original-resolution labels, a 150-class global confusion matrix and
     the upstream two-stage logit resize. Omit max_images for the full split.
     Latency measures artifact execution; external resize and argmax are excluded.
     Pass background_channel for rf-detr-internal exports ([1,151,H,W], background first).
-    latency_only (rf-detr-internal exports, TensorRT FP16) times the artifact without scoring it; see
-    RFDETRInternalSemanticLatencyTRTInference.
     """
-    if latency_only:
-        if not (background_channel and runtime == "trt" and fp16 is not False):
-            raise ValueError("latency_only supports rf-detr-internal exports (background_channel) on TensorRT FP16")
-        if not Path(onnx_path).is_file():
-            raise FileNotFoundError(f"RF-DETR semantic ONNX artifact not found: {onnx_path}")
-        results = [run_latency_only(onnx_path, image_dir, buffer_time, max_images)]
-        with open(output_file_name, "w") as f:
-            json.dump(results, f, indent=2, allow_nan=False)
-        print(results[0]["latency_stats"], "throttled:", results[0]["throttled"])
-        return
     if background_channel:
         runtimes = {"trt": RFDETRInternalSemanticTRTInference, "onnx-cuda": RFDETRInternalSemanticONNXInference,
                     "onnx-cpu": RFDETRInternalSemanticONNXCPUInference}
