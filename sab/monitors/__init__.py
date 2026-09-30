@@ -2,6 +2,7 @@ import platform
 
 from sab.monitors.base import Monitor, NullMonitor
 from sab.monitors.cpufreq import CpufreqMonitor
+from sab.monitors.macos import ThermalStateMonitor
 from sab.monitors.nvidia import ThrottleMonitor
 from sab.runtimes.base import Runtime
 
@@ -15,7 +16,9 @@ def select_monitor(runtime: type[Runtime], device: str, system: str | None = Non
         return ThrottleMonitor()
     if device == "cpu" and system == "Linux":
         return CpufreqMonitor()
+    if system == "Darwin":
+        return ThermalStateMonitor()
     return NullMonitor()
 
 
-__all__ = ["CpufreqMonitor", "Monitor", "NullMonitor", "ThrottleMonitor", "select_monitor"]
+__all__ = ["CpufreqMonitor", "Monitor", "NullMonitor", "ThermalStateMonitor", "ThrottleMonitor", "select_monitor"]

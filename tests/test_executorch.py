@@ -6,6 +6,7 @@ pytest.importorskip("executorch.runtime")
 from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner  # noqa: E402
 from executorch.exir import to_edge_transform_and_lower  # noqa: E402
 
+from sab.runtimes import executorch as executorch_runtime  # noqa: E402
 from sab.runtimes.executorch import ExecuTorchRuntime  # noqa: E402
 
 pytestmark = pytest.mark.executorch
@@ -64,6 +65,48 @@ def build_pte(model_dir):
         return built[case]
 
     return build
+
+
+@pytest.mark.parametrize(
+    "registered, cpu, npu",
+    [({"XnnpackBackend"}, True, False), ({"XnnpackBackend", "CoreMLBackend"}, True, True), (set(), False, False)],
+)
+def test_each_device_needs_its_backend_in_the_installed_executorch(monkeypatch, registered, cpu, npu):
+    monkeypatch.setattr(executorch_runtime, "_registered_backends", lambda: registered)
+
+    assert ExecuTorchRuntime.is_available("cpu") is cpu
+    assert ExecuTorchRuntime.is_available("npu") is npu
+    assert not ExecuTorchRuntime.is_available("gpu")
+
+
+def test_a_missing_private_backend_api_means_not_available(monkeypatch):
+    def raise_attribute_error():
+        raise AttributeError("no _get_registered_backend_names")
+
+    monkeypatch.setattr(executorch_runtime, "_registered_backends", raise_attribute_error)
+
+    assert not ExecuTorchRuntime.is_available("cpu")
+
+
+@pytest.mark.skipif(not ExecuTorchRuntime.is_available("npu"), reason="needs the ExecuTorch Core ML backend")
+def test_npu_runs_a_core_ml_program(model_dir):
+    import coremltools as ct
+    from executorch.backends.apple.coreml.compiler import CoreMLBackend
+    from executorch.backends.apple.coreml.partition import CoreMLPartitioner
+
+    torch.manual_seed(0)
+    module = ConvModel().eval()
+    compile_specs = CoreMLBackend.generate_compile_specs(compute_unit=ct.ComputeUnit.CPU_AND_NE)
+    exported = torch.export.export(module, (torch.rand(1, 3, 8, 8),))
+    program = to_edge_transform_and_lower(exported, partitioner=[CoreMLPartitioner(compile_specs=compile_specs)])
+    path = model_dir / "conv_coreml.pte"
+    path.write_bytes(program.to_executorch().buffer)
+    runtime = ExecuTorchRuntime(str(path), "npu", "fp16")
+    images = torch.rand(1, 3, 8, 8)
+
+    outputs = runtime.run({"input0": images})
+
+    torch.testing.assert_close(outputs["output0"], module(images), atol=1e-2, rtol=1e-2)
 
 
 def test_run_matches_the_torch_model_and_outputs_own_their_memory(build_pte):
