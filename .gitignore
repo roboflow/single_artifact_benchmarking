@@ -1,1 +1,4 @@
 **/__pycache__/**
+.venv/
+uv.lock.bak
+.pytest_cache/

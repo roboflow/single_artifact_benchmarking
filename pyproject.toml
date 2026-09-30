@@ -1,0 +1,70 @@
+[project]
+name = "single-artifact-benchmarking"
+version = "0.3.0"
+description = "Single Artifact Benchmarking"
+readme = "README.md"
+license = { file = "LICENSE.txt" }
+authors = [{ name = "Isaac Robinson", email = "isaac@roboflow.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.7.0",
+    "torchvision>=0.22.0",
+    "numpy>=1.26",
+    "onnx>=1.17",
+    "supervision>=0.22.0",
+    "pycocotools>=2.0.8",
+    "faster-coco-eval>=1.6.7",
+    "fire>=0.7.0",
+    "pillow",
+    "requests",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+# One extra for each runtime.
+# TRT 11 removes EXPLICIT_BATCH and the FP16/INT8 builder flags. The cu13 build matches the CUDA 13 torch wheels.
+tensorrt = [
+    "tensorrt-cu13>=10.13,<11; sys_platform == 'linux'",
+    "tensorrt-cu13-libs>=10.13,<11; sys_platform == 'linux'",
+    "tensorrt-cu13-bindings>=10.13,<11; sys_platform == 'linux'",
+]
+onnx-cpu = ["onnxruntime>=1.22.0"]
+onnx-gpu = ["onnxruntime-gpu>=1.22.0"]
+# One extra for each host.
+nvidia = ["single-artifact-benchmarking[tensorrt,onnx-gpu]"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+# The NVIDIA index gives no upload dates, so a global exclude-newer would hide every TensorRT wheel.
+exclude-newer-package = { tensorrt-cu13 = false, tensorrt-cu13-libs = false, tensorrt-cu13-bindings = false }
+conflicts = [
+    [{ extra = "onnx-cpu" }, { extra = "onnx-gpu" }],
+    [{ extra = "onnx-cpu" }, { extra = "nvidia" }],
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sab"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "tensorrt: needs TensorRT and an NVIDIA GPU",
+    "onnxruntime: needs onnxruntime",
+]
+
+# PyPI holds only stub source packages for TensorRT 10; the wheels are on NVIDIA's index.
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"
+explicit = true
+
+[tool.uv.sources]
+tensorrt-cu13 = { index = "nvidia" }
+tensorrt-cu13-libs = { index = "nvidia" }
+tensorrt-cu13-bindings = { index = "nvidia" }

@@ -1,16 +1,20 @@
+from functools import partial
+
 import torch
 import torchvision.transforms.functional as TF
-import os
-import json
 import fire
 
+from sab.processors import Processor
+from sab.request import ArtifactBenchmarkRequest
+from sab.results import pretty_print_results
+from sab.runner import run_benchmark_on_artifacts
+from sab.runtimes.onnxruntime import ONNXRuntime
+from sab.runtimes.tensorrt import TRTRuntime
 
-from sab.onnx_inference import ONNXInferenceCUDA, ONNXInferenceCPU
-from sab.trt_inference import TRTInference
-from sab.models.utils import ArtifactBenchmarkRequest, run_benchmark_on_artifacts, pretty_print_results
+TRT_WITHOUT_CUDA_GRAPH = partial(TRTRuntime, use_cuda_graph=False)
 
 
-def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) -> tuple[torch.Tensor, dict]:
+def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int], normalize: bool = True) -> tuple[torch.Tensor, dict]:
     if len(image.shape) == 3:
         image = image.unsqueeze(0)
 
@@ -48,7 +52,10 @@ def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) ->
         "scale": scale,
         "padding": padding
     })
-    
+
+    if not normalize:
+        image = image * 255.0
+
     return image, metadata
 
 
@@ -79,144 +86,71 @@ def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict) -> tupl
     return bboxes, labels, scores
 
 
-class YOLOv11ONNXInference(ONNXInferenceCUDA):
+class YOLOv11Processor(Processor):
     # reference: https://github.com/ultralytics/ultralytics/blob/3c88bebc9514a4d7f70b771811ddfe3a625ef14d/examples/YOLOv8-OpenCV-ONNX-Python/main.py#L23C57-L31
-    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
-        return preprocess_image(input_image, self.image_input_shape)
-    
-    def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return postprocess_output(outputs, metadata)
-    
-
-class YOLOv11ONNXCPUInference(ONNXInferenceCPU):
-    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
-        return preprocess_image(input_image, self.image_input_shape)
+    def preprocess(self, image: torch.Tensor) -> tuple[torch.Tensor, dict]:
+        return preprocess_image(image, self.input_spec.shape, self.normalize)
 
     def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         return postprocess_output(outputs, metadata)
 
 
-class YOLOv11TRTInference(TRTInference):
-    def __init__(self, model_path: str, image_input_name: str|None=None):
-        super().__init__(model_path, image_input_name, use_cuda_graph=False)
-
-    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
-        return preprocess_image(input_image, self.image_input_shape)
-    
-    def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return postprocess_output(outputs, metadata)
-    
-
-def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, output_file_name: str = "yolov11_results.json"):
-    requests = [
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11n_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=False,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11n_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=True,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11n_nms_conf_0.01.onnx",
-            inference_class=YOLOv11ONNXCPUInference,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11s_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=False,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11s_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=True,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11s_nms_conf_0.01.onnx",
-            inference_class=YOLOv11ONNXCPUInference,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11m_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=False,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11m_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=True,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11m_nms_conf_0.01.onnx",
-            inference_class=YOLOv11ONNXCPUInference,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11l_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=False,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11l_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=True,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11l_nms_conf_0.01.onnx",
-            inference_class=YOLOv11ONNXCPUInference,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11x_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=False,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11x_nms_conf_0.01.onnx",
-            inference_class=YOLOv11TRTInference,
-            needs_fp16=True,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11x_nms_conf_0.01.onnx",
-            inference_class=YOLOv11ONNXCPUInference,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
+def build_requests(buffer_time: float = 0.0) -> list[ArtifactBenchmarkRequest]:
+    return [
+        request
+        for size in ("n", "s", "m", "l", "x")
+        for request in (
+            ArtifactBenchmarkRequest(
+                artifact_path=f"yolo11{size}_nms_conf_0.01.onnx",
+                runtime=TRT_WITHOUT_CUDA_GRAPH,
+                processor=YOLOv11Processor,
+                device="gpu",
+                precision="fp32",
+                buffer_time=buffer_time,
+                needs_class_remapping=True,
+            ),
+            ArtifactBenchmarkRequest(
+                artifact_path=f"yolo11{size}_nms_conf_0.01.onnx",
+                runtime=TRT_WITHOUT_CUDA_GRAPH,
+                processor=YOLOv11Processor,
+                device="gpu",
+                precision="fp16",
+                buffer_time=buffer_time,
+                needs_class_remapping=True,
+            ),
+            ArtifactBenchmarkRequest(
+                artifact_path=f"yolo11{size}_nms_conf_0.01.onnx",
+                runtime=ONNXRuntime,
+                processor=YOLOv11Processor,
+                device="cpu",
+                precision="fp32",
+                buffer_time=buffer_time,
+                needs_class_remapping=True,
+            ),
+        )
     ]
 
-    results = run_benchmark_on_artifacts(requests, image_dir, annotations_file_path)
 
-    print(f"Saving results to {output_file_name}")
-    with open(output_file_name, "w") as f:
-        json.dump(results, f)
-    
+def main(
+    image_dir: str,
+    annotations_file_path: str,
+    buffer_time: float = 0.0,
+    output_file_name: str = "yolov11_results.json",
+    runtimes=None,
+    devices=None,
+    max_images: int | None = None,
+    rerun: bool = False,
+):
+    results = run_benchmark_on_artifacts(
+        build_requests(buffer_time),
+        image_dir,
+        annotations_file_path,
+        output_file=output_file_name,
+        runtimes=runtimes,
+        devices=devices,
+        max_images=max_images,
+        rerun=rerun,
+    )
     pretty_print_results(results)
 
 
