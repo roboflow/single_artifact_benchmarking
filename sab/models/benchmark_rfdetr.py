@@ -8,6 +8,7 @@ from sab.request import ArtifactBenchmarkRequest
 from sab.results import pretty_print_results
 from sab.runner import run_benchmark_on_artifacts
 from sab.runtimes.onnxruntime import ONNXRuntime
+from sab.runtimes.openvino import OpenVINORuntime
 from sab.runtimes.tensorrt import TRTRuntime
 
 
@@ -52,13 +53,24 @@ class RFDETRProcessor(Processor):
         return postprocess_output(outputs, metadata)
 
 
+# rf-detr-large.onnx in the bucket is the deprecated large model. The current large model is rf-detr-large-new.onnx.
+ONNX_FILES = (
+    "rf-detr-nano.onnx",
+    "rf-detr-small.onnx",
+    "rf-detr-medium.onnx",
+    "rf-detr-large-new.onnx",
+    "rf-detr-xlarge.onnx",
+    "rf-detr-xxlarge.onnx",
+)
+
+
 def build_requests(buffer_time: float = 0.0) -> list[ArtifactBenchmarkRequest]:
-    return [
+    onnx_rows = [
         request
-        for size in ("nano", "small", "medium")
+        for onnx_file in ONNX_FILES
         for request in (
             ArtifactBenchmarkRequest(
-                artifact_path=f"rf-detr-{size}.onnx",
+                artifact_path=onnx_file,
                 runtime=TRTRuntime,
                 processor=RFDETRProcessor,
                 device="gpu",
@@ -66,7 +78,7 @@ def build_requests(buffer_time: float = 0.0) -> list[ArtifactBenchmarkRequest]:
                 buffer_time=buffer_time,
             ),
             ArtifactBenchmarkRequest(
-                artifact_path=f"rf-detr-{size}.onnx",
+                artifact_path=onnx_file,
                 runtime=TRTRuntime,
                 processor=RFDETRProcessor,
                 device="gpu",
@@ -74,7 +86,7 @@ def build_requests(buffer_time: float = 0.0) -> list[ArtifactBenchmarkRequest]:
                 buffer_time=buffer_time,
             ),
             ArtifactBenchmarkRequest(
-                artifact_path=f"rf-detr-{size}.onnx",
+                artifact_path=onnx_file,
                 runtime=ONNXRuntime,
                 processor=RFDETRProcessor,
                 device="cpu",
@@ -83,6 +95,19 @@ def build_requests(buffer_time: float = 0.0) -> list[ArtifactBenchmarkRequest]:
             ),
         )
     ]
+    openvino_rows = [
+        ArtifactBenchmarkRequest(
+            artifact_path=onnx_file,
+            runtime=OpenVINORuntime,
+            processor=RFDETRProcessor,
+            device="cpu",
+            precision=precision,
+            buffer_time=buffer_time,
+        )
+        for onnx_file in ONNX_FILES
+        for precision in ("fp32", "fp16")
+    ]
+    return onnx_rows + openvino_rows
 
 
 def main(

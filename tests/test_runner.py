@@ -9,6 +9,7 @@ from sab import runner
 from sab.request import ArtifactBenchmarkRequest
 from sab.results import load_results
 from sab.runner import parse_filter, run_benchmark_on_artifact, run_benchmark_on_artifacts
+from sab.runtimes.base import UnavailableOnHost
 from tests.fakes import FakeProcessor, FakeRuntime
 
 STATS = [0.5] * 12
@@ -195,6 +196,22 @@ def test_an_availability_check_that_raises_skips_the_request_and_the_run_continu
     assert [r["artifact_request"]["artifact_path"] for r in rows] == ["b.onnx"]
     out = capsys.readouterr().out
     assert out.count("Skipping a.onnx") == 1 and "driver exploded" in out
+
+
+class RuntimeThatCannotRunHere(FakeRuntime):
+    def __init__(self, artifact_path, device, precision):
+        raise UnavailableOnHost("this CPU compiles fp16 as fp32")
+
+
+def test_unavailable_on_host_at_load_skips_the_row_and_runs_the_next(harness, tmp_path, capsys):
+    requests = [make_request("a.xml", runtime=RuntimeThatCannotRunHere), make_request("b.onnx")]
+
+    rows = run_many(requests, tmp_path / "out.json")
+
+    out = capsys.readouterr().out
+    assert [row["artifact_request"]["artifact_path"] for row in rows] == ["b.onnx"]
+    assert "Skipping a.xml" in out and "this CPU compiles fp16 as fp32" in out
+    assert [row["artifact_request"]["artifact_path"] for row in load_results(str(tmp_path / "out.json"))] == ["b.onnx"]
 
 
 def test_resume_keeps_the_old_row_and_does_not_run(harness, tmp_path):
