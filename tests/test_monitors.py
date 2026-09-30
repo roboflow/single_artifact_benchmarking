@@ -1,3 +1,4 @@
+import sys
 import time
 from contextlib import nullcontext
 from typing import ClassVar
@@ -6,6 +7,7 @@ import pytest
 
 from sab.monitors import NullMonitor, select_monitor
 from sab.monitors.cpufreq import CpufreqMonitor
+from sab.monitors.macos import ThermalStateMonitor, read_thermal_state
 from sab.monitors.nvidia import ThrottleMonitor
 from tests.fakes import FakeRuntime
 
@@ -81,6 +83,59 @@ class TestCpufreqMonitor:
         assert monitor.summary()["samples"] == samples_at_exit
 
 
+NOMINAL, FAIR, SERIOUS = 0, 1, 2
+
+
+def make_thermal_monitor(*states) -> ThermalStateMonitor:
+    return ThermalStateMonitor(poll_interval_s=0.001, read_state=scripted_reader(*states))
+
+
+def thermal_verdict_after_polls(*states, polls: int) -> bool | None:
+    monitor = make_thermal_monitor(*states)
+    with monitor:
+        for _ in range(polls):
+            monitor.poll_once()
+    return monitor.did_throttle()
+
+
+class TestThermalStateMonitor:
+    def test_unreadable_state_at_enter_gives_an_unknown_verdict_and_no_summary(self):
+        monitor = make_thermal_monitor(OSError("no Foundation"))
+        with monitor:
+            monitor.poll_once()
+        assert monitor.did_throttle() is None
+        assert monitor.summary() == {}
+
+    def test_state_that_rises_to_fair_during_the_run_throttles(self):
+        assert thermal_verdict_after_polls(NOMINAL, NOMINAL, FAIR, polls=2) is True
+
+    def test_nominal_throughout_does_not_throttle(self):
+        assert thermal_verdict_after_polls(NOMINAL, polls=3) is False
+
+    def test_already_fair_at_enter_counts_as_throttled(self):
+        assert thermal_verdict_after_polls(FAIR, NOMINAL, polls=1) is True
+
+    def test_failed_poll_during_the_run_is_skipped(self):
+        monitor = make_thermal_monitor(NOMINAL, OSError("gone"), SERIOUS)
+        with monitor:
+            monitor.poll_once()
+            monitor.poll_once()
+        assert monitor.summary() == {"start_state": "nominal", "max_state": "serious", "samples": 1}
+
+    def test_background_thread_polls_and_stops_on_exit(self):
+        monitor = make_thermal_monitor(NOMINAL, FAIR)
+        with monitor:
+            while monitor.summary()["samples"] == 0:
+                pass
+        samples_at_exit = monitor.summary()["samples"]
+        assert monitor.did_throttle() is True
+        assert monitor.summary()["samples"] == samples_at_exit
+
+    @pytest.mark.skipif(sys.platform != "darwin", reason="reads NSProcessInfo")
+    def test_real_read_gives_a_state_from_zero_to_three(self):
+        assert read_thermal_state() in range(4)
+
+
 def test_nvml_did_throttle_raises_when_the_watcher_failed():
     monitor = ThrottleMonitor(target_freq=1590)
     monitor._error = RuntimeError("nvml died")
@@ -101,9 +156,14 @@ def runtime_named(runtime_name: str) -> type[FakeRuntime]:
         ("tensorrt", "gpu", "Linux", ThrottleMonitor),
         ("onnxruntime", "gpu", "Linux", ThrottleMonitor),
         ("onnxruntime", "cpu", "Linux", CpufreqMonitor),
-        ("onnxruntime", "cpu", "Darwin", NullMonitor),
         ("coreml", "gpu", "Linux", NullMonitor),
     ],
 )
 def test_select_monitor(runtime_name, device, system, expected):
     assert type(select_monitor(runtime_named(runtime_name), device, system=system)) is expected
+
+
+@pytest.mark.parametrize("device", ["cpu", "gpu", "npu"])
+def test_darwin_selects_the_thermal_state_monitor_for_every_device(device):
+    monitor = select_monitor(runtime_named("coreml"), device, system="Darwin")
+    assert type(monitor) is ThermalStateMonitor

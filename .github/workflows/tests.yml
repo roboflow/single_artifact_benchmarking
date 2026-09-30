@@ -18,6 +18,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install
-        run: uv sync --python 3.12 --extra onnx-cpu --extra openvino --extra executorch --group dev
+        # The coreai-core wheels need macOS 26 or later, and its runtime needs macOS 27. The Core AI tests skip here.
+        run: uv sync --python 3.12 --extra onnx-cpu --extra openvino --extra executorch ${{ matrix.os == 'macos-latest' && '--extra coreml' || '' }} --group dev
       - name: Test
         run: uv run pytest -q

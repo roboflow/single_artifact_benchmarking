@@ -32,8 +32,11 @@ onnx-cpu = ["onnxruntime>=1.22.0"]
 onnx-gpu = ["onnxruntime-gpu>=1.22.0"]
 openvino = ["openvino>=2025.0"]
 executorch = ["executorch>=1.0"]
+coreml = ["coremltools>=8.0,<10; sys_platform == 'darwin'"]
+coreai = ["coreai-core>=1.0.0b2; sys_platform == 'darwin'"]
 # One extra for each host.
 nvidia = ["single-artifact-benchmarking[tensorrt,onnx-gpu,openvino]"]
+mac = ["single-artifact-benchmarking[onnx-cpu,openvino,executorch,coreml,coreai]"]
 
 [dependency-groups]
 dev = ["pytest>=8"]
@@ -44,6 +47,8 @@ exclude-newer-package = { tensorrt-cu13 = false, tensorrt-cu13-libs = false, ten
 conflicts = [
     [{ extra = "onnx-cpu" }, { extra = "onnx-gpu" }],
     [{ extra = "onnx-cpu" }, { extra = "nvidia" }],
+    [{ extra = "mac" }, { extra = "onnx-gpu" }],
+    [{ extra = "mac" }, { extra = "nvidia" }],
 ]
 
 [build-system]
@@ -60,6 +65,8 @@ markers = [
     "onnxruntime: needs onnxruntime",
     "openvino: needs openvino",
     "executorch: needs executorch",
+    "coreml: needs coremltools on macOS",
+    "coreai: needs coreai-core and the macOS 27 Core AI runtime",
 ]
 
 # PyPI holds only stub source packages for TensorRT 10; the wheels are on NVIDIA's index.
