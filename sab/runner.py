@@ -39,17 +39,18 @@ def run_benchmark_on_artifact(
     pipeline = Pipeline(runtime, processor, request.output_names)
 
     monitor = select_monitor(runtime_class(request.runtime), request.device)
-    with monitor:
-        accuracy_stats = evaluate(
-            pipeline,
-            images_dir,
-            annotations_file_path,
-            inv_class_mapping,
-            buffer_time=request.buffer_time,
-            max_images=request.max_images,
-            max_dets=request.max_dets,
-        )
-    # After the with block the monitor has stopped, so the verdict is final.
+    # The monitor watches only the timed pass, not the COCO scoring after it.
+    accuracy_stats = evaluate(
+        pipeline,
+        images_dir,
+        annotations_file_path,
+        inv_class_mapping,
+        buffer_time=request.buffer_time,
+        max_images=request.max_images,
+        max_dets=request.max_dets,
+        monitor=monitor,
+    )
+    # evaluate() has closed the monitor, so the verdict is final.
     throttled = monitor.did_throttle()
 
     if throttled:
@@ -70,6 +71,17 @@ def _row(request: ArtifactBenchmarkRequest, accuracy_stats, latency_stats, throt
         "latency_stats": latency_stats,
         "throttled": throttled,
     }
+
+
+def _is_available(request: ArtifactBenchmarkRequest) -> bool:
+    try:
+        available = runtime_class(request.runtime).is_available(request.device)
+    except Exception as error:
+        print(f"Skipping {request.artifact_path}: the availability check of {request.runtime_name} on {request.device} failed: {error!r}")
+        return False
+    if not available:
+        print(f"Skipping {request.artifact_path}: {request.runtime_name} is not available on {request.device} on this host.")
+    return available
 
 
 def run_benchmark_on_artifacts(
@@ -118,8 +130,7 @@ def run_benchmark_on_artifacts(
             rows.append(row)
             continue
 
-        if not runtime_class(request.runtime).is_available(request.device):
-            print(f"Skipping {request.artifact_path}: {request.runtime_name} is not available on {request.device} on this host.")
+        if not _is_available(request):
             continue
 
         key = request.key()

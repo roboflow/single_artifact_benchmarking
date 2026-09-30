@@ -4,12 +4,7 @@ import pytest
 import torch
 
 from sab.runtimes.tensorrt import TRTRuntime, builder_flag_names, engine_path_for
-
-
-def make_two_input_model(path):
-    from tests.test_onnxruntime import make_two_input_model as make_model
-
-    return make_model(path)
+from tests.fakes import make_two_input_model
 
 
 def requires_tensorrt(test):

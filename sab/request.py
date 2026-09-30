@@ -35,7 +35,7 @@ class ArtifactBenchmarkRequest:
 
     def key(self) -> tuple:
         """Identifies the row for resume: a result with the same key is the same measurement."""
-        return (self.artifact_path, self.runtime_name, self.device, self.precision, self.max_images)
+        return (self.artifact_path, self.runtime_name, self.device, self.precision, self.max_images, self.buffer_time, self.max_dets)
 
     def dump(self) -> dict:
         return {

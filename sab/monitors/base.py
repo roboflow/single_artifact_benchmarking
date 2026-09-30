@@ -1,3 +1,4 @@
+from contextlib import AbstractContextManager, nullcontext
 from typing import Protocol, Self
 
 
@@ -7,6 +8,10 @@ class Monitor(Protocol):
     def __enter__(self) -> Self: ...
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None: ...
+
+    def busy(self) -> AbstractContextManager:
+        """Marks the time in which the model runs. A monitor that samples can ignore samples outside it."""
+        ...
 
     def did_throttle(self) -> bool | None:
         """True or False when the signal was readable. None when this host gives no readable signal."""
@@ -23,6 +28,9 @@ class NullMonitor:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         return None
+
+    def busy(self) -> AbstractContextManager:
+        return nullcontext()
 
     def did_throttle(self) -> bool | None:
         return None

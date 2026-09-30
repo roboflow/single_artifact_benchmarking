@@ -14,7 +14,7 @@ import threading
 from functools import reduce
 from operator import or_
 from subprocess import run
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 
 NVML_TIMEOUT = 1000  # ms
@@ -244,6 +244,10 @@ class ThrottleMonitor:
             raise
         return self
     
+    def busy(self):
+        # NVML reports clock events for the whole pass, so the idle time between images needs no filter.
+        return nullcontext()
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         try:
             self.stop()

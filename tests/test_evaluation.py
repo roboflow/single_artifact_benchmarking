@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 import pytest
 from PIL import Image
 
@@ -40,6 +42,38 @@ def test_run_timed_pass_moves_images_to_the_input_device_of_the_runtime(image_pa
     run_timed_pass(pipeline, image_paths, sleep_fn=no_sleep)
 
     assert [call["images"].device.type for call in runtime.calls] == ["meta"] * 3
+
+
+class BusyRecordingMonitor:
+    def __init__(self):
+        self.inside_busy = False
+        self.busy_entries = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return None
+
+    @contextmanager
+    def busy(self):
+        self.inside_busy = True
+        self.busy_entries += 1
+        yield
+        self.inside_busy = False
+
+
+def test_run_timed_pass_marks_each_inference_as_busy(image_paths):
+    pipeline, runtime = make_pipeline()
+    monitor = BusyRecordingMonitor()
+    run_inside_busy = []
+    original_run = runtime.run
+    runtime.run = lambda inputs: run_inside_busy.append(monitor.inside_busy) or original_run(inputs)
+
+    run_timed_pass(pipeline, image_paths, monitor=monitor, sleep_fn=lambda _: run_inside_busy.append(monitor.inside_busy))
+
+    assert monitor.busy_entries == 3
+    assert run_inside_busy == [True, False] * 3
 
 
 def test_run_timed_pass_reports_each_prediction_to_on_result(image_paths):

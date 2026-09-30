@@ -31,6 +31,14 @@ def _static_shape(shape) -> list[int]:
     return [dim if isinstance(dim, int) and dim > 0 else 1 for dim in shape]
 
 
+def _static_image_shape(name: str, shape) -> list[int]:
+    """Replace a symbolic batch dimension with 1. Any other symbolic or unknown dimension is an error."""
+    for index, dim in enumerate(shape):
+        if index > 0 and not (isinstance(dim, int) and dim > 0):
+            raise ValueError(f"Image input {name!r} has a symbolic or unknown dimension {dim!r} in {list(shape)}. Export the model with a fixed image size.")
+    return _static_shape(shape)
+
+
 class ONNXRuntime(Runtime):
     """Runs an ONNX artifact with IOBinding. The timed call is `run_with_iobinding`.
 
@@ -73,7 +81,7 @@ class ONNXRuntime(Runtime):
         self.outputs = self.session.get_outputs()
         image_name = pick_image_input([node.name for node in self.inputs], image_input_name)
         image_node = next(node for node in self.inputs if node.name == image_name)
-        self.input_spec = InputSpec(name=image_name, shape=tuple(_static_shape(image_node.shape)))
+        self.input_spec = InputSpec(name=image_name, shape=tuple(_static_image_shape(image_name, image_node.shape)))
 
         self.warmup()
 

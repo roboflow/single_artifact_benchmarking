@@ -41,6 +41,8 @@ def main(
         flags.append("--rerun")
 
     scripts = sorted(glob.glob(f"{models_dir}/benchmark_*.py"))
+    # Its main takes an onnx_path first, so it does not fit the shared command line.
+    scripts = [script for script in scripts if Path(script).name != "benchmark_yololite.py"]
     all_results = []
 
     for script in scripts:

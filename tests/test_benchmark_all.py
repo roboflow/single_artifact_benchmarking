@@ -57,6 +57,12 @@ def test_runs_each_script_with_the_current_interpreter_and_no_flags_by_default(t
     assert len(combined_rows(tmp_path)) == 2
 
 
+def test_the_yololite_script_is_not_run(tmp_path, models_dir, recorder):
+    (models_dir / "benchmark_yololite.py").write_text("")
+    run_main(tmp_path, models_dir)
+    assert [Path(command[1]).name for command in recorder.commands] == ["benchmark_a.py", "benchmark_b.py"]
+
+
 def test_flags_are_passed_when_set(tmp_path, models_dir, recorder):
     run_main(tmp_path, models_dir, runtimes="fake,trt", devices=("cpu", "gpu"), max_images=5, rerun=True)
     assert recorder.commands[0][6:] == ["--runtimes=fake,trt", "--devices=cpu,gpu", "--max_images=5", "--rerun"]

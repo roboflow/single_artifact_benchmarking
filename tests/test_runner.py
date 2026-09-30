@@ -1,5 +1,7 @@
 from typing import ClassVar
 
+import json
+
 import pytest
 import torch
 
@@ -47,8 +49,10 @@ class Harness:
         path = pipeline.runtime.artifact_path
         if path == self.fail_on:
             raise RuntimeError("boom")
-        assert self.monitors[-1].entered and not self.monitors[-1].exited
-        pipeline.infer(torch.zeros(3, 8, 8))
+        monitor = kwargs.pop("monitor")
+        assert monitor is self.monitors[-1]
+        with monitor:
+            pipeline.infer(torch.zeros(3, 8, 8))
         self.evaluated.append((path, kwargs["max_images"]))
         self.evaluate_kwargs.append(kwargs)
         self.class_mappings.append(class_mapping)
@@ -77,6 +81,14 @@ def harness(monkeypatch):
 
 class OtherRuntime(FakeRuntime):
     name: ClassVar[str] = "other"
+
+
+class BrokenAvailabilityRuntime(FakeRuntime):
+    name: ClassVar[str] = "broken"
+
+    @classmethod
+    def is_available(cls, device: str) -> bool:
+        raise OSError("driver exploded")
 
 
 def make_request(path="a.onnx", **overrides) -> ArtifactBenchmarkRequest:
@@ -177,6 +189,14 @@ def test_unavailable_runtime_prints_one_skip_line_and_writes_no_row(harness, tmp
     assert capsys.readouterr().out.count("Skipping") == 1
 
 
+def test_an_availability_check_that_raises_skips_the_request_and_the_run_continues(harness, tmp_path, capsys):
+    requests = [make_request("a.onnx", runtime=BrokenAvailabilityRuntime), make_request("b.onnx")]
+    rows = run_many(requests, tmp_path / "out.json")
+    assert [r["artifact_request"]["artifact_path"] for r in rows] == ["b.onnx"]
+    out = capsys.readouterr().out
+    assert out.count("Skipping a.onnx") == 1 and "driver exploded" in out
+
+
 def test_resume_keeps_the_old_row_and_does_not_run(harness, tmp_path):
     output = tmp_path / "out.json"
     first = run_many([make_request()], output)
@@ -203,6 +223,26 @@ def test_max_images_is_part_of_the_key(harness, tmp_path):
     assert rows[0]["artifact_request"]["max_images"] == 5
     assert len(load_results(str(output))) == 2
     assert request.max_images is None
+
+
+def test_buffer_time_is_part_of_the_key(harness, tmp_path):
+    output = tmp_path / "out.json"
+    run_many([make_request(buffer_time=0.0)], output)
+    run_many([make_request(buffer_time=5.0)], output)
+    assert len(harness.evaluated) == 2
+    assert [r["artifact_request"]["buffer_time"] for r in load_results(str(output))] == [0.0, 5.0]
+
+
+def test_rows_with_the_old_schema_are_dropped_and_the_run_goes_on(harness, tmp_path, capsys):
+    output = tmp_path / "out.json"
+    old_rows = [{"artifact_request": {"onnx_path": "old.onnx"}}, {"artifact_request": {"onnx_path": "older.onnx"}}]
+    output.write_text(json.dumps(old_rows))
+
+    run_many([make_request()], output)
+
+    assert saved_paths(output) == ["a.onnx"]
+    printed = capsys.readouterr().out
+    assert str(output) in printed and "2" in printed
 
 
 def test_rows_of_filtered_out_requests_stay_in_the_file(harness, tmp_path):

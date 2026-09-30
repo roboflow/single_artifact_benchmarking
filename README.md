@@ -77,14 +77,10 @@ Each runtime times the smallest call that runs the full graph. Preprocessing and
 | Device | Signal |
 |---|---|
 | NVIDIA GPU | NVML clock events. SAB locks the clocks to their maximum during the run. |
-| x86 Linux CPU | Core frequencies from `/sys/devices/system/cpu/cpu*/cpufreq`, polled during the run. |
+| x86 Linux CPU | Core frequencies from `/sys/devices/system/cpu/cpu*/cpufreq`, polled while the model runs. |
 | Other | None. The `Throttled` column shows `?`. |
 
-The CPU signal is clean only with the `performance` governor. With `schedutil` or `powersave`, idle cores slow down between images, and SAB can report throttling that did not occur. Set the governor before a CPU run:
-
-```bash
-sudo cpupower frequency-set --governor performance
-```
+SAB reads the core frequencies only while the model runs. Between images, a scaling governor such as `schedutil` slows the idle cores, and SAB does not count that as throttling. The baseline is the first frequency read during an inference.
 
 ### Tests
 

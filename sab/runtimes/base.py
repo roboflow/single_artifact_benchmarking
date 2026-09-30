@@ -59,7 +59,10 @@ class Runtime(ABC):
     @classmethod
     @abstractmethod
     def is_available(cls, device: str) -> bool:
-        """True when this host can run the runtime on `device`: the import works and the hardware exists."""
+        """True when this host can run the runtime on `device`: the import works and the hardware exists.
+
+        Returns False instead of raising.
+        """
 
     @classmethod
     @abstractmethod

@@ -1,4 +1,3 @@
-import onnx
 import pytest
 import torch
 from onnx import TensorProto, helper
@@ -6,40 +5,19 @@ from onnx import TensorProto, helper
 pytest.importorskip("onnxruntime")
 
 from sab.runtimes.onnxruntime import ONNXRuntime  # noqa: E402
+from tests.fakes import make_two_input_model, save_model  # noqa: E402
 
 pytestmark = pytest.mark.onnxruntime
 
 
-def save_model(graph, path):
-    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)], ir_version=8)
-    onnx.checker.check_model(model)
-    onnx.save(model, str(path))
-    return str(path)
-
-
-def make_single_input_model(path, batch="batch"):
+def make_single_input_model(path, batch="batch", shape=None):
     """outputs = images * 2, with a symbolic batch dimension by default."""
-    images = helper.make_tensor_value_info("images", TensorProto.FLOAT, [batch, 3, 4, 4])
-    outputs = helper.make_tensor_value_info("outputs", TensorProto.FLOAT, [batch, 3, 4, 4])
+    shape = shape or [batch, 3, 4, 4]
+    images = helper.make_tensor_value_info("images", TensorProto.FLOAT, shape)
+    outputs = helper.make_tensor_value_info("outputs", TensorProto.FLOAT, shape)
     two = helper.make_tensor("two", TensorProto.FLOAT, [], [2.0])
     node = helper.make_node("Mul", ["images", "two"], ["outputs"])
     return save_model(helper.make_graph([node], "single", [images], [outputs], [two]), path)
-
-
-def make_two_input_model(path, image_name="images"):
-    """boxes = images * 2 and labels = orig_target_sizes + 1, with an int64 second input."""
-    images = helper.make_tensor_value_info(image_name, TensorProto.FLOAT, [1, 3, 4, 4])
-    sizes = helper.make_tensor_value_info("orig_target_sizes", TensorProto.INT64, [1, 2])
-    boxes = helper.make_tensor_value_info("boxes", TensorProto.FLOAT, [1, 3, 4, 4])
-    labels = helper.make_tensor_value_info("labels", TensorProto.INT64, [1, 2])
-    two = helper.make_tensor("two", TensorProto.FLOAT, [], [2.0])
-    one = helper.make_tensor("one", TensorProto.INT64, [], [1])
-    nodes = [
-        helper.make_node("Mul", [image_name, "two"], ["boxes"]),
-        helper.make_node("Add", ["orig_target_sizes", "one"], ["labels"]),
-    ]
-    graph = helper.make_graph(nodes, "double", [images, sizes], [boxes, labels], [two, one])
-    return save_model(graph, path)
 
 
 def make_dynamic_output_model(path):
@@ -76,6 +54,12 @@ def test_input_spec_replaces_a_symbolic_batch_with_one_and_keeps_a_static_one(tm
     assert symbolic.input_spec.name == "images"
     assert symbolic.input_spec.shape == (1, 3, 4, 4)
     assert static.input_spec.shape == (2, 3, 4, 4)
+
+
+def test_a_symbolic_image_height_or_width_is_an_error_that_names_the_input(tmp_path):
+    path = make_single_input_model(tmp_path / "m.onnx", shape=["batch", 3, "height", "width"])
+    with pytest.raises(ValueError, match="images"):
+        cpu_runtime(path)
 
 
 def test_run_records_one_timing_per_call_after_warmup(tmp_path):

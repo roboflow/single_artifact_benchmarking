@@ -7,7 +7,12 @@ def load_results(path: str) -> list[dict]:
     if not os.path.exists(path):
         return []
     with open(path) as f:
-        return json.load(f)
+        rows = json.load(f)
+    current_rows = [row for row in rows if "artifact_path" in row["artifact_request"]]
+    dropped = len(rows) - len(current_rows)
+    if dropped:
+        print(f"Dropped {dropped} rows with the old schema from {path}. They have no artifact_path.")
+    return current_rows
 
 
 def _json_default(value):
@@ -39,6 +44,8 @@ def result_key(row: dict) -> tuple:
         request["device"],
         request["precision"],
         request["max_images"],
+        request["buffer_time"],
+        request["max_dets"],
     )
 
 

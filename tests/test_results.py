@@ -44,7 +44,7 @@ def test_save_accepts_numpy_numbers(tmp_path):
 
 
 def test_result_key_matches_the_request_key():
-    request = make_request(max_images=5, precision="fp16", device="gpu")
+    request = make_request(max_images=5, precision="fp16", device="gpu", buffer_time=2.0, max_dets=50)
     assert result_key(make_row(request)) == request.key()
 
 

@@ -1,3 +1,5 @@
+import time
+from contextlib import nullcontext
 from typing import ClassVar
 
 import pytest
@@ -21,41 +23,60 @@ def scripted_reader(*readings):
     return read
 
 
-def make_monitor(*readings) -> CpufreqMonitor:
-    return CpufreqMonitor(poll_interval_s=0.001, tolerance_mhz=50.0, read_frequencies=scripted_reader(*readings))
+def make_monitor(*readings, poll_interval_s: float = 3600.0) -> CpufreqMonitor:
+    """The default interval keeps the background thread idle, so the tests poll by hand."""
+    return CpufreqMonitor(poll_interval_s=poll_interval_s, tolerance_mhz=50.0, read_frequencies=scripted_reader(*readings))
 
 
-def verdict_after_polls(*readings, polls: int) -> bool | None:
+def verdict_after_polls(*readings, busy: list[bool]) -> bool | None:
+    """Enter the monitor (one reading), then poll once for each item of `busy`, inside busy() when True."""
     monitor = make_monitor(*readings)
     with monitor:
-        for _ in range(polls):
-            monitor.poll_once()
+        for is_busy in busy:
+            with monitor.busy() if is_busy else nullcontext():
+                monitor.poll_once()
     return monitor.did_throttle()
 
 
 class TestCpufreqMonitor:
     @pytest.mark.parametrize("unreadable", [FileNotFoundError("no cpufreq"), []])
     def test_no_signal_at_enter_gives_an_unknown_verdict(self, unreadable):
-        assert verdict_after_polls(unreadable, polls=1) is None
+        assert verdict_after_polls(unreadable, busy=[True]) is None
 
-    def test_drop_below_baseline_by_more_than_tolerance_throttles(self):
-        assert verdict_after_polls([3000.0, 3000.0], [3000.0, 2900.0], polls=1) is True
+    def test_no_busy_poll_gives_an_unknown_verdict(self):
+        assert verdict_after_polls([3000.0], [1000.0], busy=[False, False]) is None
 
-    def test_drop_within_tolerance_does_not_throttle(self):
-        assert verdict_after_polls([3000.0], [2960.0], polls=1) is False
+    def test_busy_drop_below_the_first_busy_poll_by_more_than_tolerance_throttles(self):
+        assert verdict_after_polls([3000.0, 3000.0], [3000.0, 3000.0], [3000.0, 2900.0], busy=[True, True]) is True
 
-    def test_a_dip_that_recovers_still_throttles(self):
-        assert verdict_after_polls([3000.0], [2000.0], [3000.0], polls=2) is True
+    def test_busy_drop_within_tolerance_does_not_throttle(self):
+        assert verdict_after_polls([3000.0], [3000.0], [2960.0], busy=[True, True]) is False
 
-    def test_failed_poll_during_the_run_is_skipped(self):
-        assert verdict_after_polls([3000.0], OSError("gone"), [3000.0], polls=2) is False
+    def test_the_baseline_is_the_first_busy_poll_not_the_boosted_read_at_enter(self):
+        assert verdict_after_polls([3500.0], [3000.0], [3000.0], busy=[True, True]) is False
 
-    def test_background_thread_polls_and_stops_on_exit(self):
-        monitor = make_monitor([3000.0], [1000.0])
+    def test_a_poll_between_images_reads_nothing(self):
+        reads = []
+        monitor = CpufreqMonitor(poll_interval_s=3600.0, read_frequencies=lambda: reads.append(1) or [1000.0])
         with monitor:
-            while monitor.summary()["samples"] == 0:
-                pass
+            monitor.poll_once()
+        assert len(reads) == 1  # only the readability check at enter
+
+    def test_a_busy_dip_that_recovers_still_throttles(self):
+        assert verdict_after_polls([3000.0], [3000.0], [2000.0], [3000.0], busy=[True, True, True]) is True
+
+    def test_failed_busy_poll_is_skipped(self):
+        assert verdict_after_polls([3000.0], [3000.0], OSError("gone"), [3000.0], busy=[True, True, True]) is False
+
+    def test_background_thread_polls_while_busy_and_stops_on_exit(self):
+        monitor = make_monitor([3000.0], [3000.0], [1000.0], poll_interval_s=0.001)
+        deadline = time.monotonic() + 5.0
+        with monitor:
+            with monitor.busy():
+                while monitor.summary().get("samples", 0) < 2:
+                    assert time.monotonic() < deadline, "the thread did not poll"
         samples_at_exit = monitor.summary()["samples"]
+        time.sleep(0.01)
         assert monitor.did_throttle() is True
         assert monitor.summary()["samples"] == samples_at_exit
 

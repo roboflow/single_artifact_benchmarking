@@ -1,4 +1,6 @@
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from glob import glob
 from typing import Callable, Self
 
@@ -18,9 +20,14 @@ def read_sysfs_frequencies() -> list[float]:
 
 
 class CpufreqMonitor:
-    """Polls the core frequencies during the run. A core that falls below its start frequency is throttling.
+    """Polls the core frequencies while the model runs. A core that falls below its baseline is throttling.
 
-    The verdict is None when the frequency files are not readable at enter, for example on macOS.
+    Only polls inside `busy()` count. Between images, a scaling governor slows the idle cores,
+    and that is not throttling. The baseline is the first busy poll, because the read at enter
+    comes right after the warm-up, when the cores are at their boost frequency.
+
+    The verdict is None when the frequency files are not readable at enter, for example on macOS,
+    or when no poll happened inside `busy()`.
     """
 
     def __init__(
@@ -32,6 +39,8 @@ class CpufreqMonitor:
         self._poll_interval_s = poll_interval_s
         self._tolerance_mhz = tolerance_mhz
         self._read_frequencies = read_frequencies
+        self._readable = False
+        self._busy = threading.Event()
         self._baseline: list[float] | None = None
         self._min_mhz = 0.0
         self._max_drop_mhz = 0.0
@@ -41,13 +50,11 @@ class CpufreqMonitor:
 
     def __enter__(self) -> Self:
         try:
-            baseline = self._read_frequencies()
+            self._readable = bool(self._read_frequencies())
         except OSError:
-            baseline = []
-        if not baseline:
+            self._readable = False
+        if not self._readable:
             return self
-        self._baseline = baseline
-        self._min_mhz = min(baseline)
         self._stop.clear()
         self._thread = threading.Thread(target=self._poll_until_stopped, daemon=True)
         self._thread.start()
@@ -60,13 +67,24 @@ class CpufreqMonitor:
         self._thread.join()
         self._thread = None
 
+    @contextmanager
+    def busy(self) -> Iterator[None]:
+        self._busy.set()
+        try:
+            yield
+        finally:
+            self._busy.clear()
+
     def poll_once(self) -> None:
-        if self._baseline is None:
+        if not self._readable or not self._busy.is_set():
             return
         try:
             current = self._read_frequencies()
         except OSError:
             return  # one failed read must not end the watch
+        if self._baseline is None:
+            self._baseline = current
+            self._min_mhz = min(current)
         self._samples += 1
         self._min_mhz = min([self._min_mhz, *current])
         drops = [before - now for before, now in zip(self._baseline, current)]
