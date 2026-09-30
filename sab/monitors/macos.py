@@ -1,6 +1,7 @@
 import ctypes
 import ctypes.util
 import threading
+from contextlib import AbstractContextManager, nullcontext
 from functools import cache
 from typing import Callable, Self
 
@@ -33,6 +34,7 @@ def _thermal_state_getter() -> Callable[[], int]:
     # On arm64, each objc_msgSend call needs a function type that matches its signature.
     msg_send_address = ctypes.cast(objc.objc_msgSend, ctypes.c_void_p).value
     send_returning_object = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(msg_send_address)
+    # NSInteger is `long`: 64-bit on both arm64 and x86_64 macOS.
     send_returning_long = ctypes.CFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p)(msg_send_address)
 
     def get_thermal_state() -> int:
@@ -76,6 +78,10 @@ class ThermalStateMonitor:
         self._thread = threading.Thread(target=self._poll_until_stopped, daemon=True)
         self._thread.start()
         return self
+
+    def busy(self) -> AbstractContextManager:
+        # The thermal state belongs to the whole system, so the idle time between images needs no filter.
+        return nullcontext()
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         if self._thread is None:

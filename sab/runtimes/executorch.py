@@ -72,7 +72,7 @@ class ExecuTorchRuntime(Runtime):
             return False
         try:
             return _BACKENDS[device] in _registered_backends()
-        except ImportError:
+        except (ImportError, AttributeError):
             return False
 
     @classmethod

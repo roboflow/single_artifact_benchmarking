@@ -79,6 +79,15 @@ def test_each_device_needs_its_backend_in_the_installed_executorch(monkeypatch, 
     assert not ExecuTorchRuntime.is_available("gpu")
 
 
+def test_a_missing_private_backend_api_means_not_available(monkeypatch):
+    def raise_attribute_error():
+        raise AttributeError("no _get_registered_backend_names")
+
+    monkeypatch.setattr(executorch_runtime, "_registered_backends", raise_attribute_error)
+
+    assert not ExecuTorchRuntime.is_available("cpu")
+
+
 @pytest.mark.skipif(not ExecuTorchRuntime.is_available("npu"), reason="needs the ExecuTorch Core ML backend")
 def test_npu_runs_a_core_ml_program(model_dir):
     import coremltools as ct

@@ -1,6 +1,7 @@
 """The fixtures in tests/data/coreai come from coreai-torch 0.4.2: `images * 2` in fp32 and fp16, and a
 two-input graph that gives `images * 2` and `orig_target_sizes + 1` (int32)."""
 
+import gc
 import sys
 from pathlib import Path
 
@@ -90,3 +91,13 @@ def test_is_available_needs_macos_a_known_device_and_that_compute_unit(monkeypat
 
     monkeypatch.setattr(sys, "platform", "linux")
     assert not CoreAIRuntime.is_available("cpu")
+
+
+def test_the_event_loop_closes_when_the_runtime_is_collected():
+    runtime = CoreAIRuntime(fixture("double_fp32"), "cpu", "fp32")
+    loop = runtime._loop
+
+    del runtime
+    gc.collect()
+
+    assert loop.is_closed()

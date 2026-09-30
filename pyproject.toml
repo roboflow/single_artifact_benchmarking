@@ -33,10 +33,10 @@ onnx-gpu = ["onnxruntime-gpu>=1.22.0"]
 openvino = ["openvino>=2025.0"]
 executorch = ["executorch>=1.0"]
 coreml = ["coremltools>=8.0,<10; sys_platform == 'darwin'"]
-coreai = ["coreai-core>=1.0.0b2; sys_platform == 'darwin'"]
+coreai = ["coreai-core==1.0.0b2; sys_platform == 'darwin'"]
 # One extra for each host.
 nvidia = ["single-artifact-benchmarking[tensorrt,onnx-gpu,openvino]"]
-mac = ["single-artifact-benchmarking[onnx-cpu,openvino,executorch,coreml,coreai]"]
+mac = ["single-artifact-benchmarking[onnx-cpu,openvino,executorch,coreml]"]
 
 [dependency-groups]
 dev = ["pytest>=8"]

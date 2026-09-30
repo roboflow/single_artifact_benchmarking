@@ -65,6 +65,11 @@ class CoreAIRuntime(Runtime):
 
         self.warmup()
 
+    def __del__(self):
+        loop = getattr(self, "_loop", None)
+        if loop is not None and not loop.is_closed():
+            loop.close()
+
     @classmethod
     def is_available(cls, device: str) -> bool:
         if device not in cls.devices or sys.platform != "darwin":

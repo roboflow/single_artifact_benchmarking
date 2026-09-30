@@ -58,10 +58,16 @@ Other hosts install the extra for each runtime they need:
 
 The `nvidia` extra now includes `openvino`, so `benchmark_all` also runs the OpenVINO CPU rows. These rows take most of the run time. To run only the TensorRT and ONNX Runtime rows, add `--runtimes=tensorrt,onnxruntime`.
 
-The `mac` extra installs ONNX Runtime (CPU), OpenVINO, ExecuTorch, Core ML and Core AI:
+The `mac` extra installs ONNX Runtime (CPU), OpenVINO, ExecuTorch and Core ML. It works on any Apple silicon Mac:
 
 ```bash
 uv sync --python 3.12 --extra mac
+```
+
+On macOS 27, add the `coreai` extra for Core AI. The `coreai-core` wheels exist only for macOS 26 and later, so `--extra mac` does not include them:
+
+```bash
+uv sync --python 3.12 --extra mac --extra coreai
 ```
 
 The benchmark scripts have rows only for the `.onnx` artifacts in the bucket. TensorRT, ONNX Runtime and OpenVINO read these files directly. The LiteRT, ExecuTorch, Core ML and Core AI runtimes need exported artifacts, so the scripts have no rows for them. To benchmark such an artifact, give its `ArtifactBenchmarkRequest` to `run_benchmark_on_artifacts`.
