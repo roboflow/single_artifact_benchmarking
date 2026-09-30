@@ -102,6 +102,10 @@ class ExecuTorchRuntime(Runtime):
         return image_like[0]
 
     def _to_artifact_inputs(self, inputs: dict[str, torch.Tensor]) -> list[torch.Tensor]:
+        expected_names = {_input_name(index) for index in range(len(self._input_dtypes))}
+        if set(inputs) != expected_names:
+            raise ValueError(f"Inputs {sorted(inputs)} do not match the artifact inputs {sorted(expected_names)}")
+
         return [
             inputs[_input_name(index)].detach().to("cpu", dtype).contiguous()
             for index, dtype in enumerate(self._input_dtypes)

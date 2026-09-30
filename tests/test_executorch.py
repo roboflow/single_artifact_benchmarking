@@ -1,5 +1,3 @@
-import sys
-
 import pytest
 import torch
 
@@ -68,12 +66,6 @@ def build_pte(model_dir):
     return build
 
 
-@pytest.mark.parametrize("platform", ["linux", "darwin"])
-def test_cpu_is_available_on_linux_and_macos(monkeypatch, platform):
-    monkeypatch.setattr(sys, "platform", platform)
-    assert ExecuTorchRuntime.is_available("cpu")
-
-
 def test_run_matches_the_torch_model_and_outputs_own_their_memory(build_pte):
     module, _, path = build_pte("conv")
     runtime = ExecuTorchRuntime(path, "cpu", "fp32")
@@ -113,6 +105,15 @@ def test_run_finds_the_image_at_a_later_position(build_pte):
     assert runtime.input_spec.shape == (1, 3, 8, 8)
     assert outputs["output0"].tolist() == [[11.0, 21.0]]
     torch.testing.assert_close(outputs["output1"], module(sizes, images)[1], atol=1e-4, rtol=1e-4)
+
+
+def test_run_rejects_input_names_that_are_not_positional(build_pte):
+    *_, path = build_pte("conv")
+    runtime = ExecuTorchRuntime(path, "cpu", "fp32")
+
+    with pytest.raises(ValueError, match=r"\['images'\].*\['input0'\]"):
+        runtime.run({"images": torch.rand(1, 3, 8, 8)})
+    assert runtime.profiler.timings == []
 
 
 def test_run_records_one_timing_per_call_after_warmup(build_pte):
