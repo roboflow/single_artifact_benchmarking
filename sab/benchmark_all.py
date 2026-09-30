@@ -4,19 +4,26 @@ import glob
 import subprocess
 import json
 import fire
+import sys
 from pathlib import Path
 
 from sab.models.utils import pretty_print_results
 
 
-def main(image_dir, annotation_file, buffer_time=0.0, models_dir="models", output_dir="benchmark_results"):
-    """Run all benchmark models and collect outputs into one list."""
+def main(image_dir, annotation_file, buffer_time=0.0, models_dir=None, output_dir="benchmark_results", task="coco"):
+    """Run COCO benchmarks or semantic benchmarks (annotation_file is a mask directory)."""
+    if task not in {"coco", "semantic"}:
+        raise ValueError("task must be coco or semantic")
+    package_models = models_dir is None
+    if package_models:
+        models_dir = Path(__file__).parent / "models"
     
     # Create output directory
     Path(output_dir).mkdir(exist_ok=True)
     
     # Find and run all benchmark scripts
-    scripts = glob.glob(f"{models_dir}/benchmark_*.py")
+    scripts = sorted(glob.glob(f"{models_dir}/benchmark_*.py"))
+    scripts = [s for s in scripts if (Path(s).stem.endswith("_semantic")) == (task == "semantic")]
     all_results = []
     
     for script in scripts:
@@ -26,7 +33,8 @@ def main(image_dir, annotation_file, buffer_time=0.0, models_dir="models", outpu
         
         # Run the script
         try:
-            subprocess.run(["python", script, image_dir, annotation_file, str(buffer_time), output_file], check=True)
+            entry_point = ["-m", f"sab.models.{script_name}"] if package_models else [script]
+            subprocess.run([sys.executable, *entry_point, image_dir, annotation_file, str(buffer_time), output_file], check=True)
             
             # Load results
             if os.path.exists(output_file):

@@ -32,7 +32,7 @@ def run_timed_pass(
     buffer_time: float = 0.0,
     max_images: int | None = None,
     monitor=None,
-    on_result: Callable[[int, tuple[int, int], tuple], None] | None = None,
+    on_result: Callable[[int, tuple[int, int], tuple | torch.Tensor], None] | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
 ):
     """Run the measured inference loop over `image_paths` and return latency stats.
@@ -53,7 +53,8 @@ def run_timed_pass(
         max_images: run only the first N images
         monitor: optional context manager to hold open for the pass, such as a
             ThrottleMonitor or a CPUFrequencyMonitor. Read its verdict after the call.
-        on_result: called with (index, initial_shape, (xyxy, class_id, score, masks))
+        on_result: called with (index, initial_shape, outputs), where outputs is
+            (xyxy, class_id, score, masks) or an HxW semantic class map,
             for each image, before the buffer sleep. Lets a caller layer accumulation
             on top of the loop without changing what is timed.
         sleep_fn: seam for tests; the buffer sleep itself.
@@ -77,21 +78,37 @@ def run_timed_pass(
 
             if inference.prediction_type == "bbox":
                 xyxy, class_id, score = inference.infer(image)
-                masks = None
+                outputs = (xyxy, class_id, score, None)
             elif inference.prediction_type == "segm":
-                xyxy, class_id, score, masks = inference.infer(image)
+                outputs = inference.infer(image)
+            elif inference.prediction_type == "semantic":
+                outputs = inference.infer(image)
             else:
                 raise ValueError(f"Invalid prediction type: {inference.prediction_type}")
 
             if on_result is not None:
-                on_result(index, initial_shape, (xyxy, class_id, score, masks))
+                on_result(index, initial_shape, outputs)
 
             sleep_fn(buffer_time)
 
     return inference.profiler.get_stats()
 
 
-def evaluate(inference, image_dir: str, annotations_file_path: str, class_mapping: dict[int, str]|None=None, buffer_time: float=0.0, output_file_name: str|None=None, max_images: int|None=None, max_dets: int=100):
+def evaluate(inference, image_dir: str, annotations_file_path: str, class_mapping: dict[int, str]|None=None, buffer_time: float=0.0, output_file_name: str|None=None, max_images: int|None=None, max_dets: int=100, semantic_config=None):
+    if inference.prediction_type == "semantic":
+        from sab.semantic_evaluation import evaluate_semantic
+        if semantic_config is None:
+            raise ValueError("Semantic evaluation requires a SemanticEvaluationConfig")
+        if class_mapping is not None:
+            raise ValueError("Use semantic_config.label_offset for semantic label mapping")
+        stats = evaluate_semantic(inference, image_dir, annotations_file_path, semantic_config,
+                                  buffer_time=buffer_time, max_images=max_images)
+        if output_file_name is not None:
+            with open(output_file_name, "w") as f:
+                json.dump(stats, f, indent=2, allow_nan=False)
+        return stats
+    if semantic_config is not None:
+        raise ValueError("semantic_config requires a semantic inference adapter")
     COCO, COCOeval, mask_utils = _load_coco_tools()
 
     predictions = []

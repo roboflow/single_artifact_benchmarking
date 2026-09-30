@@ -1,3 +1,5 @@
+import copy
+from pathlib import Path
 import sys, numpy as np
 import onnx
 from onnx import helper, TensorProto, numpy_helper, shape_inference
@@ -217,4 +219,110 @@ def fuse_yolo_mask_postprocessing_into_onnx(in_path):
     onnx.save_model(model, out_path, save_as_external_data=False)
     print(f"Saved {out_path}\nOutputs: _det_meta=({B},{K},6), _masks_cropped=({B},{K},{H},{W})")
 
+    return out_path
+
+
+def _convert_efficientvit_precision(source, fp32_nodes):
+    """Round weights to FP16 and insert casts only at precision boundaries.
+
+    ORT's generic converter casts each protected node's output back to FP16,
+    even when its consumer is also protected. Reconnect those original edges
+    in FP32 before removing the now-unused casts. Otherwise large attention
+    products overflow and the 1e-15 denominator epsilon becomes zero.
+    """
+    from onnxruntime.transformers.float16 import convert_float_to_float16
+    from onnxruntime.transformers.onnx_model import OnnxModel
+
+    protected = set(fp32_nodes)
+    originals = {node.name: node for node in source.graph.node}
+    if not protected <= originals.keys():
+        raise ValueError(f"Unknown FP32 nodes: {sorted(protected - originals.keys())}")
+    producers = {value: (node.name, i) for node in source.graph.node for i, value in enumerate(node.output)}
+    result = convert_float_to_float16(copy.deepcopy(source), keep_io_types=True,
+        op_block_list=[], node_block_list=sorted(protected), force_fp16_initializers=True)
+    converted = {node.name: node for node in result.graph.node}
+    for name in protected:
+        for i, value in enumerate(originals[name].input):
+            producer, output_index = producers.get(value, (None, None))
+            if producer in protected:
+                converted[name].input[i] = converted[producer].output[output_index]
+
+    # Preserve ordinary IEEE FP16 rounding instead of the converter's optional
+    # clipping of tiny weights to the smallest nonzero half-precision value.
+    weights = {tensor.name: tensor for tensor in source.graph.initializer}
+    for tensor in result.graph.initializer:
+        original = weights.get(tensor.name)
+        if original is not None and original.data_type == TensorProto.FLOAT:
+            array = numpy_helper.to_array(original).astype(np.float16)
+            if not np.isfinite(array).all():
+                raise ValueError(f"Weight {tensor.name} cannot be represented in FP16")
+            tensor.CopyFrom(numpy_helper.from_array(array, tensor.name))
+
+    OnnxModel(result).topological_sort()
+    live = {output.name for output in result.graph.output}
+    kept = []
+    for node in reversed(result.graph.node):
+        if any(output in live for output in node.output):
+            kept.append(node)
+            live.update(node.input)
+    del result.graph.node[:]
+    result.graph.node.extend(reversed(kept))
+    info = [value for value in result.graph.value_info if value.name in live]
+    del result.graph.value_info[:]
+    result.graph.value_info.extend(info)
+    result = onnx.shape_inference.infer_shapes(result)
+    onnx.checker.check_model(result)
+    return result
+
+
+def _efficientvit_attention_nodes(model):
+    """Find normalized linear attention by connectivity, not exporter node names."""
+    producers = {value: node for node in model.graph.node for value in node.output}
+    protected = set()
+    for divide in model.graph.node:
+        if divide.op_type != "Div":
+            continue
+        numerator, denominator = [producers.get(value) for value in divide.input]
+        if numerator is None or numerator.op_type != "Slice" or denominator is None or denominator.op_type != "Add":
+            continue
+        terms = [producers.get(value) for value in denominator.input]
+        slices = [node for node in terms if node is not None and node.op_type == "Slice"]
+        constants = [node for node in terms if node is not None and node.op_type == "Constant"]
+        product = producers.get(numerator.input[0])
+        if (len(slices) != 1 or len(constants) != 1 or product is None or product.op_type != "MatMul"
+                or slices[0].input[0] != numerator.input[0]):
+            continue
+        protected.update(node.name for node in (divide, numerator, denominator, slices[0], constants[0], product))
+    if not protected:
+        raise ValueError("No supported EfficientViT linear attention blocks found")
+    return sorted(protected)
+
+
+def convert_efficientvit_precision(in_path):
+    """Keep FP16 weights and connected FP32 attention in an EfficientViT ONNX.
+
+    Applied by the benchmark's graph-surgery hook before FP16 engine building,
+    like YOLO mask fusion. The source artifact is preserved. All second linear
+    attention matmuls and normalization remain FP32 to avoid FP16 overflow and
+    loss of the denominator epsilon; no exporter metadata is required.
+    """
+    model = onnx.load(in_path)
+    # ONNX node names are optional, but ORT's precision converter selects by name.
+    names = {node.name for node in model.graph.node if node.name}
+    seen = set()
+    for index, node in enumerate(model.graph.node):
+        if not node.name or node.name in seen:
+            name = f"sab_efficientvit_{index}"
+            while name in names:
+                name += "_"
+            node.name = name
+            names.add(name)
+        seen.add(node.name)
+    protected = _efficientvit_attention_nodes(model)
+    result = _convert_efficientvit_precision(model, protected)
+    metadata = {entry.key: entry.value for entry in result.metadata_props}
+    metadata["sab_strongly_typed"] = "true"
+    helper.set_model_props(result, metadata)
+    out_path = str(Path(in_path).with_suffix("")) + "-mixed.onnx"
+    onnx.save(result, out_path)
     return out_path

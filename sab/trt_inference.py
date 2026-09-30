@@ -1,6 +1,7 @@
 import tensorrt as trt
 import torch
 import numpy as np
+import onnx
 
 from sab.profiler import CUDAProfiler
 
@@ -9,18 +10,24 @@ def build_engine(model_path, engine_path, use_fp16=False):
     logger = trt.Logger(trt.Logger.INFO)
     builder = trt.Builder(logger)
     
+    with open(model_path, "rb") as f:
+        model_data = f.read()
+    metadata = {entry.key: entry.value for entry in onnx.load_model_from_string(model_data).metadata_props}
+    # EfficientViT graph surgery inserts explicit casts around FP32 attention.
+    # Strong typing prevents TensorRT from demoting these operations to FP16.
+    strongly_typed = metadata.get("sab_strongly_typed") == "true"
     config = builder.create_builder_config()
-    if use_fp16:
+    if use_fp16 and not strongly_typed:
         config.set_flag(trt.BuilderFlag.FP16)
 
     EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
-    network = builder.create_network(EXPLICIT_BATCH)
+    network_flags = EXPLICIT_BATCH
+    if strongly_typed:
+        network_flags |= 1 << int(trt.NetworkDefinitionCreationFlag.STRONGLY_TYPED)
+    network = builder.create_network(network_flags)
 
     parser = trt.OnnxParser(network, logger)
 
-    with open(model_path, "rb") as f:
-        model_data = f.read()
-    
     if not parser.parse(model_data):
         print("Failed to parse ONNX model")
         for error in range(parser.num_errors):
@@ -132,6 +139,8 @@ class TRTInference:
                 torch_dtype = torch.int32
             elif dtype == np.int64:
                 torch_dtype = torch.int64
+            elif dtype == np.uint8:
+                torch_dtype = torch.uint8
             else:
                 torch_dtype = torch.float32  # Default fallback
             

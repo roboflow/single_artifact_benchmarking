@@ -10,6 +10,7 @@ from sab.clock_watch import ThrottleMonitor, CPUFrequencyMonitor
 from sab.onnx_inference import ONNXInferenceCUDA, ONNXInferenceCPU
 from sab.trt_inference import TRTInference, build_engine
 from sab.evaluation import evaluate
+from sab.semantic_evaluation import SemanticEvaluationConfig
 
 
 def download_file(url, filename):
@@ -55,6 +56,8 @@ class ArtifactBenchmarkRequest:
             max_images: int|None = None,
             graph_surgery_func: Callable[str, str]|None = None,
             max_dets: int = 100,
+            semantic_config: SemanticEvaluationConfig | None = None,
+            inference_kwargs: dict | None = None,
         ):
         self.onnx_path = onnx_path
         self.inference_class = inference_class
@@ -64,9 +67,13 @@ class ArtifactBenchmarkRequest:
         self.max_images = max_images
         self.graph_surgery_func = graph_surgery_func
         self.max_dets = max_dets
+        if semantic_config is not None and needs_class_remapping:
+            raise ValueError("COCO class remapping cannot be used with semantic evaluation")
+        self.semantic_config = semantic_config
+        self.inference_kwargs = dict(inference_kwargs or {})
         
     def dump(self):
-        return {
+        result = {
             "onnx_path": self.onnx_path,
             "inference_class": self.inference_class.__name__,
             "is_trt": issubclass(self.inference_class, TRTInference),
@@ -77,8 +84,14 @@ class ArtifactBenchmarkRequest:
             "graph_surgery_func": self.graph_surgery_func.__name__ if self.graph_surgery_func else None,
             "max_dets": self.max_dets,
         }
+        if self.semantic_config is not None:
+            result["semantic_config"] = self.semantic_config.dump()
+            result["latency_scope"] = "artifact_execution_only"
+        if self.inference_kwargs:
+            result["inference_kwargs"] = self.inference_kwargs
+        return result
 
-def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images_dir: str, annotations_file_path: str) -> tuple[dict, dict, bool]:
+def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images_dir: str, annotations_file_path: str) -> tuple[list[float] | dict, dict, bool]:
     if not os.path.exists(artifact_request.onnx_path):
         print(f"Downloading {artifact_request.onnx_path}...")
         download_file(f"https://storage.googleapis.com/single_artifact_benchmarking/{artifact_request.onnx_path}", artifact_request.onnx_path)
@@ -108,28 +121,32 @@ def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images
         else:
             print(f"Engine for {artifact_request.onnx_path} already exists at {engine_path}")
 
-        inference = artifact_request.inference_class(engine_path)
+        inference = artifact_request.inference_class(engine_path, **artifact_request.inference_kwargs)
     else:
         if artifact_request.needs_fp16:
             raise ValueError("FP16 is not supported for ONNX inference")
 
-        inference = artifact_request.inference_class(artifact_request.onnx_path)
+        inference = artifact_request.inference_class(artifact_request.onnx_path, **artifact_request.inference_kwargs)
 
     is_cpu = issubclass(artifact_request.inference_class, ONNXInferenceCPU)
 
     throttled = False
+    evaluation_kwargs = dict(
+        buffer_time=artifact_request.buffer_time, max_images=artifact_request.max_images,
+        max_dets=artifact_request.max_dets, semantic_config=artifact_request.semantic_config,
+    )
     if is_cpu:
         with CPUFrequencyMonitor() as cpu_monitor:
-            accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, buffer_time=artifact_request.buffer_time, max_images=artifact_request.max_images, max_dets=artifact_request.max_dets)
-            if cpu_monitor.did_drift():
-                throttled = True
-                summary = cpu_monitor.get_summary()
-                print(f"🔴  CPU frequency drifted during evaluation (max drift: {summary['max_drift_mhz']:.0f} MHz). Latency results may be unreliable.")
-            else:
-                print("CPU frequency stable during evaluation. Latency numbers should be reliable.")
+            accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, **evaluation_kwargs)
+        if cpu_monitor.did_drift():
+            throttled = True
+            summary = cpu_monitor.get_summary()
+            print(f"🔴  CPU frequency drifted during evaluation (max drift: {summary['max_drift_mhz']:.0f} MHz). Latency results may be unreliable.")
+        else:
+            print("CPU frequency stable during evaluation. Latency numbers should be reliable.")
     else:
         with ThrottleMonitor() as throttle_monitor:
-            accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, buffer_time=artifact_request.buffer_time, max_images=artifact_request.max_images, max_dets=artifact_request.max_dets)
+            accuracy_stats = evaluate(inference, images_dir, annotations_file_path, inv_class_mapping, **evaluation_kwargs)
         # After the with block the worker has joined, so the verdict is final.
         if throttle_monitor.did_throttle():
             throttled = True
@@ -142,7 +159,7 @@ def run_benchmark_on_artifact(artifact_request: ArtifactBenchmarkRequest, images
     return accuracy_stats, latency_stats, throttled
 
 
-def run_benchmark_on_artifacts(artifact_requests: list[ArtifactBenchmarkRequest], images_dir: str, annotations_file_path: str) -> list[tuple[dict, dict, bool]]:
+def run_benchmark_on_artifacts(artifact_requests: list[ArtifactBenchmarkRequest], images_dir: str, annotations_file_path: str) -> list[dict]:
     results = []
     for artifact_request in artifact_requests:
         accuracy_stats, latency_stats, throttled = run_benchmark_on_artifact(artifact_request, images_dir, annotations_file_path)
@@ -159,7 +176,7 @@ def run_benchmark_on_artifacts(artifact_requests: list[ArtifactBenchmarkRequest]
 
 def pretty_print_results(results: list[dict]):
     """
-    Prints summary runtime info plus COCO AP/AR breakdown.
+    Prints runtime info with semantic metrics or the COCO AP/AR breakdown.
 
     Assumes result['accuracy_stats'] is pycocotools COCOeval.stats with this order:
       0: AP@[.50:.95] (area=all,   maxDets=max_dets)
@@ -175,6 +192,21 @@ def pretty_print_results(results: list[dict]):
      10: AR@[.50:.95] (area=medium,maxDets=max_dets)
      11: AR@[.50:.95] (area=large, maxDets=max_dets)
     """
+
+    semantic_results = [r for r in results if isinstance(r["accuracy_stats"], dict)]
+    if semantic_results:
+        print(f"{'Model':38} {'Runtime':10} {'FP16':5} {'mIoU':>7} {'PixAcc':>7} {'mAcc':>7} {'Latency':>9} {'Throttled':>9}")
+        for result in semantic_results:
+            request, stats = result["artifact_request"], result["accuracy_stats"]
+            runtime = "TRT" if request["is_trt"] else ("ONNX-CPU" if request.get("is_cpu") else "ONNX-CUDA")
+            print(f"{request['onnx_path']:38} {runtime:10} {'yes' if request['needs_fp16'] else 'no':5} "
+                  f"{stats['mean_iou'] * 100:7.2f} {stats['pixel_accuracy'] * 100:7.2f} "
+                  f"{stats['mean_accuracy'] * 100:7.2f} {result['latency_stats']['median']:9.2f} "
+                  f"{'yes' if result.get('throttled') else 'no':>9}")
+        print()
+    results = [r for r in results if not isinstance(r["accuracy_stats"], dict)]
+    if not results:
+        return
 
     def _pct(stats, idx):
         try:
