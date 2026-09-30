@@ -27,13 +27,18 @@ def nchw_shape(shape: tuple[int, ...], layout: Layout) -> tuple[int, ...]:
     return tuple(shape)
 
 
+def _round_half_away_from_zero(tensor: torch.Tensor) -> torch.Tensor:
+    """The rounding of the TFLite reference quantize. `torch.round` rounds ties to the even value."""
+    return torch.sign(tensor) * torch.floor(tensor.abs() + 0.5)
+
+
 def to_artifact_input(
     tensor: torch.Tensor, layout: Layout, dtype: np.dtype | type, quantization: Quantization | None = None
 ) -> np.ndarray:
     """A contiguous array in the layout and dtype of the artifact.
 
     An integer dtype takes a float tensor. With `quantization`, the values map through the
-    scale and zero-point of the artifact. Without it, the values round to the nearest integer.
+    scale and zero-point of the artifact. Without it, the values round to the nearest integer, and a tie rounds away from zero.
     Either way they clip to the range of the dtype.
     """
     dtype = np.dtype(dtype)
@@ -46,7 +51,7 @@ def to_artifact_input(
             scale, zero_point = quantization
             tensor = tensor / scale + zero_point
         limits = np.iinfo(dtype)
-        tensor = tensor.round().clamp(limits.min, limits.max)
+        tensor = _round_half_away_from_zero(tensor).clamp(limits.min, limits.max)
 
     return np.ascontiguousarray(tensor.numpy().astype(dtype))
 

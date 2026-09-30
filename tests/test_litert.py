@@ -1,11 +1,12 @@
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
 
 pytest.importorskip("ai_edge_litert")
 
-from sab.runtimes.litert import LiteRTRuntime  # noqa: E402
+from sab.runtimes.litert import LiteRTRuntime, pick_image_input_name  # noqa: E402
 
 pytestmark = pytest.mark.litert
 
@@ -60,3 +61,30 @@ def test_warmup_leaves_no_timings_and_each_run_adds_one():
     for expected in (1, 2, 3):
         runtime.run({INPUT_NAME: torch.rand(1, 3, 4, 5)})
         assert len(runtime.profiler.timings) == expected
+
+
+IMAGE = ("serving_default_images:0", (1, 4, 5, 3), np.float32)
+SCALE = ("serving_default_scale:0", (1,), np.float32)
+MASK = ("serving_default_mask:0", (1, 4, 5, 1), np.uint8)
+
+
+def test_the_only_four_dimensional_input_is_the_image_input_of_a_multi_input_model():
+    assert pick_image_input_name([SCALE, IMAGE], None) == IMAGE[0]
+
+
+def test_an_explicit_image_input_name_wins_over_the_shape():
+    assert pick_image_input_name([SCALE, IMAGE, MASK], MASK[0]) == MASK[0]
+
+
+def test_a_single_input_model_needs_no_shape_match():
+    assert pick_image_input_name([SCALE], None) == SCALE[0]
+
+
+def test_several_four_dimensional_inputs_without_a_name_raise():
+    with pytest.raises(ValueError, match="several inputs"):
+        pick_image_input_name([IMAGE, MASK], None)
+
+
+def test_several_inputs_without_a_four_dimensional_one_raise():
+    with pytest.raises(ValueError, match="several inputs"):
+        pick_image_input_name([SCALE, ("serving_default_size:0", (2,), np.int32)], None)

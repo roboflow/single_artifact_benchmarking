@@ -51,6 +51,14 @@ def test_quantized_input_uses_scale_and_zero_point_and_clips(dtype, quantization
     assert array.flatten().tolist() == expected
 
 
+def test_quantization_rounds_a_tie_away_from_zero_like_tflite():
+    tensor = torch.tensor([[[[2.5, -2.5, 3.5, -3.5]]]])
+
+    array = to_artifact_input(tensor, "NCHW", np.int8, quantization=(1.0, 0))
+
+    assert array.flatten().tolist() == [3, -3, 4, -4]  # round-half-to-even gives 2, -2, 4, -4
+
+
 @pytest.mark.parametrize(
     "array, quantization, expected",
     [

@@ -17,6 +17,21 @@ def _quantization(details: dict) -> tuple[float, int] | None:
     return (scale, zero_point) if scale != 0 else None
 
 
+def pick_image_input_name(
+    inputs: list[tuple[str, tuple[int, ...], np.dtype | type]], image_input_name: str | None
+) -> str:
+    """Like `pick_image_input`, but a model with several inputs and no given name uses its only 4-D input.
+
+    TFLite names inputs like `serving_default_images:0`, so the name "images" does not match.
+    """
+    names = [name for name, _, _ in inputs]
+    if image_input_name is None and len(inputs) > 1:
+        image_like = [name for name, shape, _ in inputs if len(shape) == 4]
+        if len(image_like) == 1:
+            return image_like[0]
+    return pick_image_input(names, image_input_name)
+
+
 class LiteRTRuntime(Runtime):
     """Runs a `.tflite` artifact with the LiteRT interpreter. The timed call is `invoke()`.
 
@@ -40,7 +55,10 @@ class LiteRTRuntime(Runtime):
         self._inputs = {details["name"]: details for details in self.interpreter.get_input_details()}
         self._outputs = self.interpreter.get_output_details()
 
-        image_name = pick_image_input(list(self._inputs), image_input_name)
+        image_name = pick_image_input_name(
+            [(name, tuple(details["shape"]), details["dtype"]) for name, details in self._inputs.items()],
+            image_input_name,
+        )
         image_shape = tuple(int(dim) for dim in self._inputs[image_name]["shape"])
         self._image_layout: Layout = guess_layout(image_shape)
         self.input_spec = InputSpec(name=image_name, shape=nchw_shape(image_shape, self._image_layout))
