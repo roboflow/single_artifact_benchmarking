@@ -31,6 +31,7 @@ tensorrt = [
 onnx-cpu = ["onnxruntime>=1.22.0"]
 onnx-gpu = ["onnxruntime-gpu>=1.22.0"]
 openvino = ["openvino>=2025.0"]
+litert = ["ai-edge-litert>=1.2"]
 # One extra for each host.
 nvidia = ["single-artifact-benchmarking[tensorrt,onnx-gpu,openvino]"]
 
@@ -58,6 +59,7 @@ markers = [
     "tensorrt: needs TensorRT and an NVIDIA GPU",
     "onnxruntime: needs onnxruntime",
     "openvino: needs openvino",
+    "litert: needs ai-edge-litert",
 ]
 
 # PyPI holds only stub source packages for TensorRT 10; the wheels are on NVIDIA's index.
