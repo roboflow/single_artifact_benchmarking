@@ -54,7 +54,8 @@ def run_timed_pass(
         monitor: optional context manager to hold open for the pass, such as a
             ThrottleMonitor or a CPUFrequencyMonitor. Read its verdict after the call.
         on_result: called with (index, initial_shape, outputs), where outputs is
-            (xyxy, class_id, score, masks) or an HxW semantic class map,
+            (xyxy, class_id, score, masks), an HxW semantic class map, or
+            (obboxes, class_id, score) for oriented boxes,
             for each image, before the buffer sleep. Lets a caller layer accumulation
             on top of the loop without changing what is timed.
         sleep_fn: seam for tests; the buffer sleep itself.
@@ -83,6 +84,8 @@ def run_timed_pass(
                 outputs = inference.infer(image)
             elif inference.prediction_type == "semantic":
                 outputs = inference.infer(image)
+            elif inference.prediction_type == "obb":
+                outputs = inference.infer(image)
             else:
                 raise ValueError(f"Invalid prediction type: {inference.prediction_type}")
 
@@ -109,6 +112,17 @@ def evaluate(inference, image_dir: str, annotations_file_path: str, class_mappin
         return stats
     if semantic_config is not None:
         raise ValueError("semantic_config requires a semantic inference adapter")
+    if inference.prediction_type == "obb":
+        # annotations_file_path is the YOLO-OBB labels directory here, as it is the mask directory for semantic.
+        from sab.obb_evaluation import evaluate_obb
+        if class_mapping is not None:
+            raise ValueError("OBB evaluation scores the label files' class ids directly; class remapping is not supported")
+        stats = evaluate_obb(inference, image_dir, annotations_file_path, buffer_time=buffer_time,
+                             max_images=max_images, max_dets=max_dets)
+        if output_file_name is not None:
+            with open(output_file_name, "w") as f:
+                json.dump(stats, f)
+        return stats
     COCO, COCOeval, mask_utils = _load_coco_tools()
 
     predictions = []
