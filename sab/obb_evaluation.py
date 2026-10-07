@@ -191,12 +191,20 @@ def evaluate_obb(inference, image_dir: str, label_dir: str, buffer_time: float =
     pairs = obb_image_label_pairs(image_dir, label_dir, max_images)
     detections, ground_truth = [], []
 
+    def host_copy(tensor):
+        # Only NumPy is kept per image; tensors are built after the pass. Keeping torch CPU tensors created during the
+        # pass grew host memory by several MB per image (OOM on DOTA val with TensorRT CUDA-graph adapters), NumPy did
+        # not.
+        return tensor.detach().cpu().numpy().copy()
+
     def accumulate(index, initial_shape, outputs):
         obboxes, class_id, score = outputs
-        detections.append({"obboxes": obboxes.detach().float().cpu().reshape(-1, 5), "scores": score.detach().float().cpu().reshape(-1),
-                           "labels": class_id.detach().cpu().reshape(-1).long()})
-        polygons, labels = load_yolo_obb_labels(pairs[index][1], width=initial_shape[0], height=initial_shape[1])
-        ground_truth.append((min_area_rectangles(polygons), torch.from_numpy(labels)))
+        detections.append({"obboxes": host_copy(obboxes).astype(np.float32).reshape(-1, 5),
+                           "scores": host_copy(score).astype(np.float32).reshape(-1),
+                           "labels": host_copy(class_id).astype(np.int64).reshape(-1)})
+        ground_truth.append(load_yolo_obb_labels(pairs[index][1], width=initial_shape[0], height=initial_shape[1]))
 
     run_timed_pass(inference, [str(p) for p, _ in pairs], buffer_time=buffer_time, on_result=accumulate)
+    detections = [{key: torch.from_numpy(value) for key, value in image.items()} for image in detections]
+    ground_truth = [(min_area_rectangles(polygons), torch.from_numpy(labels)) for polygons, labels in ground_truth]
     return obb_coco_stats(detections, ground_truth, max_dets=max_dets)

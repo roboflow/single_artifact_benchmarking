@@ -51,7 +51,7 @@ faster-coco-eval, so the 12 COCO statistics print as for bbox models (equal to t
 `max_dets` defaults to 300: DOTA tiles can hold more than 100 objects.
 
 ```
-# YOLO26 OBB: yolo export model=yolo26n-obb.pt format=onnx imgsz=1024 nms=True conf=0.001
+# YOLO26 OBB, end-to-end (no in-graph NMS, which fails in TensorRT FP16): yolo export model=yolo26n-obb.pt format=onnx imgsz=1024 nms=False
 python -m sab.models.benchmark_yolo26_obb <tiles>/images/val <tiles>/labels/val --sizes nsmlx
 # RF-DETR OBB (rf-detr RFDETR.export(format="onnx") of an oriented-box checkpoint)
 python -m sab.models.benchmark_rfdetr_obb <tiles>/images/val <tiles>/labels/val --onnx_path rf-detr-nano-obb.onnx

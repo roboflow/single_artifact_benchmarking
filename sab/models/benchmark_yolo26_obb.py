@@ -1,11 +1,15 @@
 """SAB benchmark adapter for YOLO26 oriented-bounding-box (OBB) ONNX models, evaluated on YOLO-OBB tiles (e.g. DOTA).
 
-Export (Ultralytics, as for the other YOLO models; ``nms=True`` reproduces ``model.predict`` exactly):
+Export the end-to-end (NMS-free, one-to-one head) model, as Ultralytics' docs evaluate YOLO26 OBB (``nms=False``);
+``nms=False`` must be explicit: left unset, the export emits the raw head (1, 20, 21504) instead:
 
-    yolo export model=yolo26n-obb.pt format=onnx imgsz=1024 nms=True conf=0.001
+    yolo export model=yolo26n-obb.pt format=onnx imgsz=1024 nms=False
 
   - Input:  images  (1, 3, 1024, 1024)
   - Output: output0 (1, 300, 7)  [cx, cy, w, h, conf, cls, theta] in input pixels, theta in radians
+
+An ``nms=True`` export has the same output, but its in-graph rotated NMS stops suppressing duplicates in a TensorRT
+FP16 engine (up to 300 detections per tile where FP32 keeps ~50), halving FP16 mAP; the network itself is unaffected.
 
 Evaluate on DOTA v1.0 val tiles (1024 px, Ultralytics ``split_dota`` layout) with the YOLO-OBB labels directory in
 place of the COCO annotations file:
