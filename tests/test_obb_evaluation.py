@@ -168,3 +168,12 @@ class TestRfdetrObbPostprocess:
         from sab.models.benchmark_rfdetr_obb import postprocess_output
         with pytest.raises(ValueError, match="square"):
             postprocess_output(self.outputs(), {"original_shape": (200, 300)}, num_classes=3)
+
+
+@pytest.mark.parametrize("size", [(0.0, 0.0), (8.0, 0.0), (0.0, 8.0)])
+def test_zero_area_box_overlaps_nothing(size):
+    """A box with no area has zero-length edges; every point once passed the inside test, giving IoU above 1."""
+    target = obboxes_to_polygons(torch.tensor([[50.0, 50.0, 20.0, 10.0, 0.3]], dtype=torch.float64))
+    degenerate = obboxes_to_polygons(torch.tensor([[50.0, 50.0, *size, 0.3]], dtype=torch.float64))
+
+    assert float(polygon_iou(degenerate, target)) == 0.0

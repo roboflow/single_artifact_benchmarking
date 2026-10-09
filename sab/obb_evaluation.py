@@ -66,7 +66,15 @@ def _intersection_area(polygon1: torch.Tensor, polygon2: torch.Tensor) -> torch.
     slots = torch.arange(points.shape[-2], device=points.device)
     ordered = torch.where((slots < count[..., None])[..., None], ordered, ordered[..., :1, :])
     area = 0.5 * _cross(ordered, torch.roll(ordered, -1, dims=-2)).sum(-1).abs()
-    return torch.where(count >= 3, area, torch.zeros_like(area))
+    # A polygon with no area (a zero-width or zero-height box) intersects nothing: its zero-length edges would pass the
+    # inside test for every point, counting the other polygon's corners as inside it.
+    has_area = (_area(polygon1) > 0) & (_area(polygon2) > 0)
+    return torch.where((count >= 3) & has_area, area, torch.zeros_like(area))
+
+
+def _area(polygon: torch.Tensor) -> torch.Tensor:
+    """Shoelace area of polygons ``(..., V, 2)``, either winding order."""
+    return 0.5 * _cross(polygon, torch.roll(polygon, -1, dims=-2)).sum(-1).abs()
 
 
 def polygon_iou(polygons1: torch.Tensor, polygons2: torch.Tensor) -> torch.Tensor:
@@ -83,9 +91,8 @@ def polygon_iou(polygons1: torch.Tensor, polygons2: torch.Tensor) -> torch.Tenso
     rows, columns = (torch.cdist(center1, center2) <= radius1[:, None] + radius2[None]).nonzero(as_tuple=True)
     intersection = first.new_zeros((len(first), len(second)))
     intersection[rows, columns] = _intersection_area(first[rows], second[columns])
-    area1 = 0.5 * _cross(first, torch.roll(first, -1, dims=1)).sum(-1).abs()
-    area2 = 0.5 * _cross(second, torch.roll(second, -1, dims=1)).sum(-1).abs()
-    return intersection / (area1[:, None] + area2[None] - intersection).clamp_min(torch.finfo(torch.float64).tiny)
+    union = _area(first)[:, None] + _area(second)[None] - intersection
+    return (intersection / union.clamp_min(torch.finfo(torch.float64).tiny)).clamp(0, 1)
 
 
 def load_yolo_obb_labels(path: Path, width: int, height: int) -> tuple[np.ndarray, np.ndarray]:
