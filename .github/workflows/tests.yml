@@ -18,6 +18,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install
-        run: uv sync --python 3.12 --extra onnx-cpu --extra openvino --extra executorch --group dev
+        # The job does not install the coreai extra. Its wheels need macOS 26 or later and its runtime needs macOS 27, so the Core AI tests skip.
+        run: uv sync --python 3.12 --extra onnx-cpu --extra openvino --extra executorch ${{ matrix.os == 'macos-latest' && '--extra coreml' || '' }} --group dev
       - name: Test
         run: uv run pytest -q

@@ -22,6 +22,15 @@ _FLOAT_DTYPES = (torch.float16, torch.float32, torch.float64)
 
 WARMUP_ITERATIONS = 10
 
+# SAB device -> the ExecuTorch backend that the artifacts of that device delegate to
+_BACKENDS = {"cpu": "XnnpackBackend", "npu": "CoreMLBackend"}
+
+
+def _registered_backends() -> set[str]:
+    from executorch.runtime import Runtime as ExecuTorch
+
+    return set(ExecuTorch.get().backend_registry.registered_backend_names)
+
 
 def _input_name(index: int) -> str:
     return f"input{index}"
@@ -31,12 +40,12 @@ class ExecuTorchRuntime(Runtime):
     """Runs a `.pte` artifact. The timed call is `ExecuTorchMethod.execute`.
 
     A `.pte` has no input names, so inputs are named by position: `input0`, `input1`, and so on.
-    Outputs are named `output0`, `output1`, and so on. The artifact fixes the backend when it is
-    exported. The CPU artifacts use XNNPACK.
+    Outputs are named `output0`, `output1`, and so on. The artifact fixes the backend and its compute
+    units when it is exported: XNNPACK for cpu, Core ML with CPU_AND_NE for npu.
     """
 
     name: ClassVar[str] = "executorch"
-    devices: ClassVar[frozenset[str]] = frozenset({"cpu"})
+    devices: ClassVar[frozenset[str]] = frozenset(_BACKENDS)
 
     def __init__(self, artifact_path: str, device: str, precision: str, *, method_name: str = "forward"):
         super().__init__(artifact_path, device, precision)
@@ -64,10 +73,9 @@ class ExecuTorchRuntime(Runtime):
         if device not in cls.devices:
             return False
         try:
-            import executorch.runtime  # noqa: F401
+            return _BACKENDS[device] in _registered_backends()
         except ImportError:
             return False
-        return True
 
     @classmethod
     def version(cls) -> str:
