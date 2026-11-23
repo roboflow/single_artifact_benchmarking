@@ -9,8 +9,6 @@ import time
 from contextlib import nullcontext
 from typing import Callable
 
-from sab.onnx_inference import ONNXInferenceCPU
-
 
 def _load_coco_tools():
     """Import the COCO stack on the mAP path only.
@@ -45,14 +43,15 @@ def run_timed_pass(
     `inference.profiler.timings` after the call if you need the series.
 
     Args:
-        inference: one of SAB's inference classes (TRTInference, ONNXInferenceCUDA,
-            or ONNXInferenceCPU subclasses). Input device placement keys on the
-            concrete class: everything except ONNXInferenceCPU gets .cuda() inputs.
+        inference: a `Pipeline`, or any object with `infer`, `profiler`,
+            `prediction_type` and `input_device`. Each image moves to `input_device`
+            (a torch device string such as "cpu" or "cuda") before `infer`.
         image_paths: images to run, in order
         buffer_time: seconds to sleep after each image, to let the GPU cool
         max_images: run only the first N images
-        monitor: optional context manager to hold open for the pass, such as a
-            ThrottleMonitor or a CPUFrequencyMonitor. Read its verdict after the call.
+        monitor: optional Monitor to hold open for the pass, such as a ThrottleMonitor
+            or a CpufreqMonitor. Each `infer` runs inside `monitor.busy()`. Read the
+            verdict after the call.
         on_result: called with (index, initial_shape, (xyxy, class_id, score, masks))
             for each image, before the buffer sleep. Lets a caller layer accumulation
             on top of the loop without changing what is timed.
@@ -66,22 +65,24 @@ def run_timed_pass(
         image_paths = image_paths[:max_images]
 
     monitor_context = monitor if monitor is not None else nullcontext()
+    busy = monitor.busy if monitor is not None else nullcontext
 
     with monitor_context:
         for index, image_path in enumerate(tqdm(image_paths)):
             image = Image.open(image_path).convert("RGB")
             initial_shape = image.size
             image = TF.to_tensor(image)
-            if not isinstance(inference, ONNXInferenceCPU):
-                image = image.cuda()
+            image = image.to(inference.input_device)
 
-            if inference.prediction_type == "bbox":
-                xyxy, class_id, score = inference.infer(image)
-                masks = None
-            elif inference.prediction_type == "segm":
-                xyxy, class_id, score, masks = inference.infer(image)
-            else:
+            if inference.prediction_type not in ("bbox", "segm"):
                 raise ValueError(f"Invalid prediction type: {inference.prediction_type}")
+            with busy():
+                prediction = inference.infer(image)
+            if inference.prediction_type == "bbox":
+                xyxy, class_id, score = prediction
+                masks = None
+            else:
+                xyxy, class_id, score, masks = prediction
 
             if on_result is not None:
                 on_result(index, initial_shape, (xyxy, class_id, score, masks))
@@ -91,7 +92,7 @@ def run_timed_pass(
     return inference.profiler.get_stats()
 
 
-def evaluate(inference, image_dir: str, annotations_file_path: str, class_mapping: dict[int, str]|None=None, buffer_time: float=0.0, output_file_name: str|None=None, max_images: int|None=None, max_dets: int=100):
+def evaluate(inference, image_dir: str, annotations_file_path: str, class_mapping: dict[int, str]|None=None, buffer_time: float=0.0, output_file_name: str|None=None, max_images: int|None=None, max_dets: int=100, monitor=None):
     COCO, COCOeval, mask_utils = _load_coco_tools()
 
     predictions = []
@@ -153,6 +154,7 @@ def evaluate(inference, image_dir: str, annotations_file_path: str, class_mappin
         inference,
         image_paths,
         buffer_time=buffer_time,
+        monitor=monitor,
         on_result=accumulate_predictions,
     )
 

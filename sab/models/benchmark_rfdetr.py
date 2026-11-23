@@ -1,27 +1,26 @@
 import torch
 import torchvision.transforms.functional as TF
-from PIL import Image
-import numpy as np
-import io
-import requests
-import os
-import json
 import fire
 
+from sab.models.utils import cxcywh_to_xyxy
+from sab.processors import Processor
+from sab.request import ArtifactBenchmarkRequest
+from sab.results import pretty_print_results
+from sab.runner import run_benchmark_on_artifacts
+from sab.runtimes.onnxruntime import ONNXRuntime
+from sab.runtimes.tensorrt import TRTRuntime
 
-from sab.onnx_inference import ONNXInferenceCUDA, ONNXInferenceCPU
-from sab.trt_inference import TRTInference
-from sab.models.utils import cxcywh_to_xyxy, ArtifactBenchmarkRequest, run_benchmark_on_artifacts, pretty_print_results
 
-
-def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) -> tuple[torch.Tensor, dict]:
+def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int], normalize: bool = True) -> tuple[torch.Tensor, dict]:
     if len(image.shape) == 3:
         image = image.unsqueeze(0)
-    
-    means = torch.tensor([0.485, 0.456, 0.406], device=image.device).view(1, 3, 1, 1)
-    stds = torch.tensor([0.229, 0.224, 0.225], device=image.device).view(1, 3, 1, 1)
 
-    image = TF.normalize(image, means, stds)
+    if normalize:
+        means = torch.tensor([0.485, 0.456, 0.406], device=image.device).view(1, 3, 1, 1)
+        stds = torch.tensor([0.229, 0.224, 0.225], device=image.device).view(1, 3, 1, 1)
+        image = TF.normalize(image, means, stds)
+    else:
+        image = image * 255.0
     image = TF.resize(image, image_input_shape[2:])
     return image, {}
 
@@ -45,94 +44,67 @@ def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict) -> tupl
     return bboxes.contiguous(), labels.contiguous(), scores.contiguous()
 
 
-class RFDETRONNXInference(ONNXInferenceCUDA):
-    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
-        return preprocess_image(input_image, self.image_input_shape)
-    
-    def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return postprocess_output(outputs, metadata)
-
-
-class RFDETRONNXCPUInference(ONNXInferenceCPU):
-    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
-        return preprocess_image(input_image, self.image_input_shape)
+class RFDETRProcessor(Processor):
+    def preprocess(self, image: torch.Tensor) -> tuple[torch.Tensor, dict]:
+        return preprocess_image(image, self.input_spec.shape, self.normalize)
 
     def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         return postprocess_output(outputs, metadata)
 
 
-class RFDETRTRTInference(TRTInference):
-    def __init__(self, model_path: str, image_input_name: str|None=None):
-        super().__init__(model_path, image_input_name, use_cuda_graph=True)
-
-    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
-        return preprocess_image(input_image, self.image_input_shape)
-    
-    def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return postprocess_output(outputs, metadata)
-
-
-def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, output_file_name: str = "rfdetr_results.json"):
-    requests = [
-        ArtifactBenchmarkRequest(
-            onnx_path="rf-detr-nano.onnx",
-            inference_class=RFDETRTRTInference,
-            needs_fp16=False,
-            buffer_time=buffer_time,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="rf-detr-nano.onnx",
-            inference_class=RFDETRTRTInference,
-            needs_fp16=True,
-            buffer_time=buffer_time,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="rf-detr-nano.onnx",
-            inference_class=RFDETRONNXCPUInference,
-            buffer_time=buffer_time,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="rf-detr-small.onnx",
-            inference_class=RFDETRTRTInference,
-            needs_fp16=False,
-            buffer_time=buffer_time,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="rf-detr-small.onnx",
-            inference_class=RFDETRTRTInference,
-            needs_fp16=True,
-            buffer_time=buffer_time,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="rf-detr-small.onnx",
-            inference_class=RFDETRONNXCPUInference,
-            buffer_time=buffer_time,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="rf-detr-medium.onnx",
-            inference_class=RFDETRTRTInference,
-            needs_fp16=False,
-            buffer_time=buffer_time,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="rf-detr-medium.onnx",
-            inference_class=RFDETRTRTInference,
-            needs_fp16=True,
-            buffer_time=buffer_time,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="rf-detr-medium.onnx",
-            inference_class=RFDETRONNXCPUInference,
-            buffer_time=buffer_time,
-        ),
+def build_requests(buffer_time: float = 0.0) -> list[ArtifactBenchmarkRequest]:
+    return [
+        request
+        for size in ("nano", "small", "medium")
+        for request in (
+            ArtifactBenchmarkRequest(
+                artifact_path=f"rf-detr-{size}.onnx",
+                runtime=TRTRuntime,
+                processor=RFDETRProcessor,
+                device="gpu",
+                precision="fp32",
+                buffer_time=buffer_time,
+            ),
+            ArtifactBenchmarkRequest(
+                artifact_path=f"rf-detr-{size}.onnx",
+                runtime=TRTRuntime,
+                processor=RFDETRProcessor,
+                device="gpu",
+                precision="fp16",
+                buffer_time=buffer_time,
+            ),
+            ArtifactBenchmarkRequest(
+                artifact_path=f"rf-detr-{size}.onnx",
+                runtime=ONNXRuntime,
+                processor=RFDETRProcessor,
+                device="cpu",
+                precision="fp32",
+                buffer_time=buffer_time,
+            ),
+        )
     ]
 
-    results = run_benchmark_on_artifacts(requests, image_dir, annotations_file_path)
 
-    print(f"Saving results to {output_file_name}")
-    with open(output_file_name, "w") as f:
-        json.dump(results, f)
-    
+def main(
+    image_dir: str,
+    annotations_file_path: str,
+    buffer_time: float = 0.0,
+    output_file_name: str = "rfdetr_results.json",
+    runtimes=None,
+    devices=None,
+    max_images: int | None = None,
+    rerun: bool = False,
+):
+    results = run_benchmark_on_artifacts(
+        build_requests(buffer_time),
+        image_dir,
+        annotations_file_path,
+        output_file=output_file_name,
+        runtimes=runtimes,
+        devices=devices,
+        max_images=max_images,
+        rerun=rerun,
+    )
     pretty_print_results(results)
 
 

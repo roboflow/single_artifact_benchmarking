@@ -1,18 +1,19 @@
-import torch
-import torchvision.transforms.functional as TF
-import torch.nn.functional as F
-import os
-import json
+from functools import partial
+
 import fire
+import torch
+import torch.nn.functional as F
+import torchvision.transforms.functional as TF
 
-
-from sab.onnx_inference import ONNXInferenceCUDA
-from sab.trt_inference import TRTInference
-from sab.models.utils import ArtifactBenchmarkRequest, run_benchmark_on_artifacts, pretty_print_results
 from sab.models.graph_surgery import fuse_yolo_mask_postprocessing_into_onnx
+from sab.processors import Processor
+from sab.request import ArtifactBenchmarkRequest
+from sab.results import pretty_print_results
+from sab.runner import run_benchmark_on_artifacts
+from sab.runtimes.tensorrt import TRTRuntime
 
 
-def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) -> tuple[torch.Tensor, dict]:
+def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int], normalize: bool = True) -> tuple[torch.Tensor, dict]:
     if len(image.shape) == 3:
         image = image.unsqueeze(0)
 
@@ -44,6 +45,9 @@ def preprocess_image(image: torch.Tensor, image_input_shape: tuple[int, int]) ->
     # Pad to target size
     padding = (left, top, pad_w - left, pad_h - top)
     image = TF.pad(image, padding, fill=0)
+
+    if not normalize:
+        image = image * 255.0
     
     # Save letterbox metadata for postprocessing
     metadata.update({
@@ -107,79 +111,59 @@ def postprocess_output(outputs: dict[str, torch.Tensor], metadata: dict) -> tupl
     return bboxes, labels, scores, masks
 
 
-class YOLOv11SegONNXInference(ONNXInferenceCUDA):
-    def __init__(self, model_path: str, image_input_name: str|None=None):
-        super().__init__(model_path, image_input_name, prediction_type="segm")
+class YOLOv11SegProcessor(Processor):
+    prediction_type = "segm"
 
     # reference: https://github.com/ultralytics/ultralytics/blob/3c88bebc9514a4d7f70b771811ddfe3a625ef14d/examples/YOLOv8-OpenCV-ONNX-Python/main.py#L23C57-L31
-    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
-        return preprocess_image(input_image, self.image_input_shape)
-    
-    def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def preprocess(self, image: torch.Tensor) -> tuple[torch.Tensor, dict]:
+        return preprocess_image(image, self.input_spec.shape, self.normalize)
+
+    def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, ...]:
         return postprocess_output(outputs, metadata)
-    
 
-class YOLOv11SegTRTInference(TRTInference):
-    def __init__(self, model_path: str, image_input_name: str|None=None):
-        super().__init__(model_path, image_input_name, use_cuda_graph=False, prediction_type="segm")
 
-    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
-        return preprocess_image(input_image, self.image_input_shape)
-    
-    def postprocess(self, outputs: dict[str, torch.Tensor], metadata: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return postprocess_output(outputs, metadata)
-    
-
-def main(image_dir: str, annotations_file_path: str, buffer_time: float = 0.0, output_file_name: str = "yolov11_results.json"):
-    requests = [
+def build_requests(buffer_time: float = 0.0) -> list[ArtifactBenchmarkRequest]:
+    artifact_paths = [
+        "yolo11n_seg_nms_conf_0.01.onnx",
+        "yolo11s_seg_nms_conf_0.01.onnx",
+        "yolo11m_seg_nms_conf_0.01.onnx",
+        "yolo11l_seg_nms_conf_0.01.onnx",
+        "yolo11x_seg_nms_conf_0.01.onnx",
+    ]
+    return [
         ArtifactBenchmarkRequest(
-            onnx_path="yolo11n_seg_nms_conf_0.01.onnx",
+            artifact_path=artifact_path,
             graph_surgery_func=fuse_yolo_mask_postprocessing_into_onnx,
-            inference_class=YOLOv11SegTRTInference,
-            needs_fp16=True,
+            runtime=partial(TRTRuntime, use_cuda_graph=False),
+            processor=YOLOv11SegProcessor,
+            device="gpu",
+            precision="fp16",
             buffer_time=buffer_time,
             needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11s_seg_nms_conf_0.01.onnx",
-            graph_surgery_func=fuse_yolo_mask_postprocessing_into_onnx,
-            inference_class=YOLOv11SegTRTInference,
-            needs_fp16=True,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11m_seg_nms_conf_0.01.onnx",
-            graph_surgery_func=fuse_yolo_mask_postprocessing_into_onnx,
-            inference_class=YOLOv11SegTRTInference,
-            needs_fp16=True,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11l_seg_nms_conf_0.01.onnx",
-            graph_surgery_func=fuse_yolo_mask_postprocessing_into_onnx,
-            inference_class=YOLOv11SegTRTInference,
-            needs_fp16=True,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path="yolo11x_seg_nms_conf_0.01.onnx",
-            graph_surgery_func=fuse_yolo_mask_postprocessing_into_onnx,
-            inference_class=YOLOv11SegTRTInference,
-            needs_fp16=True,
-            buffer_time=buffer_time,
-            needs_class_remapping=True,
-        ),
+        )
+        for artifact_path in artifact_paths
     ]
 
-    results = run_benchmark_on_artifacts(requests, image_dir, annotations_file_path)
-
-    print(f"Saving results to {output_file_name}")
-    with open(output_file_name, "w") as f:
-        json.dump(results, f)
-    
+def main(
+    image_dir: str,
+    annotations_file_path: str,
+    buffer_time: float = 0.0,
+    output_file_name: str = "yolov11_results.json",
+    runtimes: str | None = None,
+    devices: str | None = None,
+    max_images: int | None = None,
+    rerun: bool = False,
+):
+    results = run_benchmark_on_artifacts(
+        build_requests(buffer_time),
+        image_dir,
+        annotations_file_path,
+        output_file=output_file_name,
+        runtimes=runtimes,
+        devices=devices,
+        max_images=max_images,
+        rerun=rerun,
+    )
     pretty_print_results(results)
 
 

@@ -18,22 +18,19 @@ Postprocessing reference:
   yololite/scripts/helpers/helpers.py:86-153  (_decode_batch_to_coco_dets)
 """
 
-import json
+from functools import partial
 
 import fire
-import numpy as np
-import onnxruntime as ort
 import torch
 import torchvision.transforms.functional as TF
 from torchvision.ops import batched_nms
 
-from sab.onnx_inference import ONNXInferenceCUDA, ONNXInferenceCPU
-from sab.trt_inference import TRTInference
-from sab.models.utils import (
-    ArtifactBenchmarkRequest,
-    run_benchmark_on_artifacts,
-    pretty_print_results,
-)
+from sab.processors import Processor
+from sab.request import ArtifactBenchmarkRequest
+from sab.results import pretty_print_results
+from sab.runner import run_benchmark_on_artifacts
+from sab.runtimes.onnxruntime import ONNXRuntime
+from sab.runtimes.tensorrt import TRTRuntime
 
 
 # ── Preprocessing ────────────────────────────────────────────────────────────
@@ -56,7 +53,7 @@ _PAD_VALUE = 114.0 / 255.0
 
 
 def preprocess_image(
-    image: torch.Tensor, image_input_shape: tuple
+    image: torch.Tensor, image_input_shape: tuple, normalize: bool = True
 ) -> tuple[torch.Tensor, dict]:
     """Letterbox + ImageNet normalize, matching yololite's val transform.
 
@@ -84,9 +81,12 @@ def preprocess_image(
 
     # ImageNet normalization (applied AFTER letterbox padding).
     # Reference: yololite/export/infer_onnx_decoded.py:124-125
-    means = _MEAN.to(device=image.device, dtype=image.dtype)
-    stds = _STD.to(device=image.device, dtype=image.dtype)
-    image = (image - means) / stds
+    if normalize:
+        means = _MEAN.to(device=image.device, dtype=image.dtype)
+        stds = _STD.to(device=image.device, dtype=image.dtype)
+        image = (image - means) / stds
+    else:
+        image = image * 255.0
 
     metadata = {
         "original_shape": (orig_h, orig_w),
@@ -165,98 +165,13 @@ def postprocess_output(
     )
 
 
-# ── Mixin for ONNX dynamic-shape binding ────────────────────────────────────
-# The decoded ONNX has a dynamic batch dimension ("batch" string) in all
-# outputs.  The base construct_bindings() crashes because torch.empty()
-# cannot handle string dimensions.  This mixin resolves dynamic dims to 1.
-# Pattern: sab/models/benchmark_dfine.py:38-91
+# ── Processor ────────────────────────────────────────────────────────────────
 
-class _YoloLiteONNXBindingsMixin:
-    """Shared construct_bindings for ONNX-CUDA and ONNX-CPU yololite inference."""
+class YoloLiteProcessor(Processor):
+    """Letterbox, ImageNet normalization and NMS for yololite decoded models."""
 
-    def construct_bindings(
-        self, input_image: torch.Tensor
-    ) -> tuple[ort.IOBinding, dict[str, torch.Tensor]]:
-        binding = self.session.io_binding()
-        input_image = input_image.contiguous()
-        if len(input_image.shape) == 3:
-            input_image = input_image.unsqueeze(0)
-
-        device_type = input_image.device.type
-        device_id = input_image.device.index if input_image.device.index is not None else 0
-
-        binding.bind_input(
-            name=self.image_input_name,
-            device_type=device_type,
-            device_id=device_id,
-            element_type=np.float16 if input_image.dtype == torch.float16 else np.float32,
-            shape=input_image.shape,
-            buffer_ptr=input_image.data_ptr(),
-        )
-
-        outputs = {}
-        for i, output_name in enumerate(self.output_names):
-            output_shape = list(self.output_shapes[i])
-            # Resolve any symbolic dimensions (e.g. "batch" or expressions like
-            # "((400//batch)) + ((1600//batch)) + ((6400//batch))").
-            for j, dim in enumerate(output_shape):
-                if not isinstance(dim, int):
-                    output_shape[j] = eval(str(dim), {"batch": 1})
-            buffer = torch.empty(
-                output_shape, dtype=torch.float32, device=input_image.device
-            )
-            binding.bind_output(
-                name=output_name,
-                device_type=device_type,
-                device_id=device_id,
-                element_type=np.float32,
-                shape=output_shape,
-                buffer_ptr=buffer.data_ptr(),
-            )
-            outputs[output_name] = buffer
-
-        return binding, outputs
-
-
-# ── Inference classes ────────────────────────────────────────────────────────
-
-class YoloLiteONNXInference(_YoloLiteONNXBindingsMixin, ONNXInferenceCUDA):
-    """ONNX-CUDA inference for yololite decoded models."""
-
-    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
-        return preprocess_image(input_image, self.image_input_shape)
-
-    def postprocess(
-        self, outputs: dict[str, torch.Tensor], metadata: dict
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return postprocess_output(outputs, metadata)
-
-
-class YoloLiteONNXCPUInference(_YoloLiteONNXBindingsMixin, ONNXInferenceCPU):
-    """ONNX-CPU inference for yololite decoded models."""
-
-    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
-        return preprocess_image(input_image, self.image_input_shape)
-
-    def postprocess(
-        self, outputs: dict[str, torch.Tensor], metadata: dict
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return postprocess_output(outputs, metadata)
-
-
-class YoloLiteTRTInference(TRTInference):
-    """TensorRT inference for yololite decoded models.
-
-    Uses use_cuda_graph=True because the decoded ONNX has fixed output shapes
-    (no NMS in the graph).  Same reasoning as RT-DETR (benchmark_rtdetr.py:113)
-    and LW-DETR (benchmark_lwdetr.py:52).
-    """
-
-    def __init__(self, model_path: str, image_input_name: str | None = None):
-        super().__init__(model_path, image_input_name, use_cuda_graph=True)
-
-    def preprocess(self, input_image: torch.Tensor) -> tuple[torch.Tensor, dict]:
-        return preprocess_image(input_image, self.image_input_shape)
+    def preprocess(self, image: torch.Tensor) -> tuple[torch.Tensor, dict]:
+        return preprocess_image(image, self.input_spec.shape, self.normalize)
 
     def postprocess(
         self, outputs: dict[str, torch.Tensor], metadata: dict
@@ -266,12 +181,50 @@ class YoloLiteTRTInference(TRTInference):
 
 # ── CLI entry point ──────────────────────────────────────────────────────────
 
+def build_requests(onnx_path: str, buffer_time: float = 0.0) -> list[ArtifactBenchmarkRequest]:
+    # The decoded ONNX has a dynamic batch dimension in its outputs, so ONNX Runtime allocates them.
+    # The decoded ONNX has fixed output shapes (no NMS in the graph), so CUDA graphs work for TensorRT.
+    return [
+        ArtifactBenchmarkRequest(
+            artifact_path=onnx_path,
+            runtime=partial(ONNXRuntime, dynamic_output_shapes=True),
+            processor=YoloLiteProcessor,
+            device="cpu",
+            precision="fp32",
+            max_dets=500,
+            buffer_time=buffer_time,
+        ),
+        ArtifactBenchmarkRequest(
+            artifact_path=onnx_path,
+            runtime=TRTRuntime,
+            processor=YoloLiteProcessor,
+            device="gpu",
+            precision="fp32",
+            max_dets=500,
+            buffer_time=buffer_time,
+        ),
+        ArtifactBenchmarkRequest(
+            artifact_path=onnx_path,
+            runtime=TRTRuntime,
+            processor=YoloLiteProcessor,
+            device="gpu",
+            precision="fp16",
+            max_dets=500,
+            buffer_time=buffer_time,
+        ),
+    ]
+
+
 def main(
     onnx_path: str,
     image_dir: str,
     annotations_file_path: str,
     buffer_time: float = 0.0,
     output_file_name: str = "yololite_results.json",
+    runtimes=None,
+    devices=None,
+    max_images: int | None = None,
+    rerun: bool = False,
 ):
     """Benchmark a yololite ONNX model with ONNX-CPU, TRT-fp32, and TRT-fp16.
 
@@ -281,36 +234,21 @@ def main(
         annotations_file_path: Path to COCO-format annotations JSON.
         buffer_time: Seconds to wait between inferences (GPU cooling).
         output_file_name: Where to save the results JSON.
+        runtimes: Run only these runtimes, for example "tensorrt".
+        devices: Run only these devices, for example "cpu".
+        max_images: Evaluate only the first N images.
+        rerun: Run rows again that the output file already holds.
     """
-    requests = [
-        ArtifactBenchmarkRequest(
-            onnx_path=onnx_path,
-            inference_class=YoloLiteONNXCPUInference,
-            max_dets=500,
-            buffer_time=buffer_time,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path=onnx_path,
-            inference_class=YoloLiteTRTInference,
-            needs_fp16=False,
-            max_dets=500,
-            buffer_time=buffer_time,
-        ),
-        ArtifactBenchmarkRequest(
-            onnx_path=onnx_path,
-            inference_class=YoloLiteTRTInference,
-            needs_fp16=True,
-            max_dets=500,
-            buffer_time=buffer_time,
-        ),
-    ]
-
-    results = run_benchmark_on_artifacts(requests, image_dir, annotations_file_path)
-
-    print(f"Saving results to {output_file_name}")
-    with open(output_file_name, "w") as f:
-        json.dump(results, f)
-
+    results = run_benchmark_on_artifacts(
+        build_requests(onnx_path, buffer_time),
+        image_dir,
+        annotations_file_path,
+        output_file=output_file_name,
+        runtimes=runtimes,
+        devices=devices,
+        max_images=max_images,
+        rerun=rerun,
+    )
     pretty_print_results(results)
 
 

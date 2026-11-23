@@ -32,10 +32,64 @@ A notable distinction from the D-FINE implementation is the inclusion of CUDA gr
 
 ## Usage
 
-To run the benchmark:
+SAB uses [uv](https://docs.astral.sh/uv/). Each host installs the extra for its hardware.
 
-1. Install dependencies: `pip install -r requirements.txt`
-2. Execute: `python3 benchmark_all.py <path to coco val dir> <path to coco val annotations>`
+1. On an x86 Linux host with an NVIDIA GPU, install the dependencies:
+   ```bash
+   uv sync --python 3.12 --extra nvidia
+   ```
+2. Run all benchmark scripts:
+   ```bash
+   uv run python -m sab.benchmark_all <path to coco val dir> <path to coco val annotations>
+   ```
+3. To run one model family, run its script:
+   ```bash
+   uv run python -m sab.models.benchmark_rfdetr <path to coco val dir> <path to coco val annotations>
+   ```
+
+### Options
+
+`benchmark_all` and each script accept these flags:
+
+| Flag | Effect |
+|---|---|
+| `--runtimes=tensorrt,onnxruntime` | Run only the rows of these runtimes. |
+| `--devices=gpu` | Run only the rows on these devices (`cpu`, `gpu`, `npu`). |
+| `--max_images=50` | Evaluate on the first N images. The table marks these rows with `*`. Use it for smoke tests. |
+| `--rerun` | Run each row again, also when the output file already holds a result for it. |
+
+SAB writes each result to the output file when the row is complete. If a run stops, run the same command again. SAB keeps the complete rows and runs only the missing rows.
+
+SAB skips a row when its runtime or device is not available on the host. A row that SAB cannot support (for example, an artifact that does not compile) shows `unsupported` and the reason.
+
+### What the latency includes
+
+Each runtime times the smallest call that runs the full graph. Preprocessing and postprocessing are outside the timed region.
+
+| Runtime | Timed call | Per-image copy to the device |
+|---|---|---|
+| TensorRT | CUDA graph replay, or `execute_async_v3` | Not included. The input is already in GPU memory. |
+| ONNX Runtime (GPU) | `run_with_iobinding` | Not included. IOBinding binds GPU buffers. |
+| ONNX Runtime (CPU) | `run_with_iobinding` | None (CPU). |
+
+### Throttle detection
+
+| Device | Signal |
+|---|---|
+| NVIDIA GPU | NVML clock events. SAB locks the clocks to their maximum during the run. |
+| x86 Linux CPU | Core frequencies from `/sys/devices/system/cpu/cpu*/cpufreq`, polled while the model runs. |
+| Other | None. The `Throttled` column shows `?`. |
+
+SAB reads the core frequencies only while the model runs. Between images, a scaling governor such as `schedutil` slows the idle cores, and SAB does not count that as throttling. The baseline is the first frequency read during an inference.
+
+### Tests
+
+```bash
+uv sync --python 3.12 --extra onnx-cpu --group dev
+```
+```bash
+uv run pytest -q
+```
 
 ## Contributions
 
