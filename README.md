@@ -52,6 +52,7 @@ Other hosts install the extra for each runtime they need:
 | Extra | Adds | Host |
 |---|---|---|
 | `openvino` | `OpenVINORuntime` | Any CPU host. |
+| `litert` | `LiteRTRuntime` | Any CPU host. |
 | `executorch` | `ExecuTorchRuntime` | Any CPU host. On macOS, it also runs Core ML programs on the `npu` device. |
 | `coreml` | `CoreMLRuntime` | macOS. |
 | `coreai` | `CoreAIRuntime` | macOS 27 on Apple silicon. |
@@ -61,7 +62,7 @@ The `nvidia` extra now includes `openvino`, so `benchmark_all` also runs the Ope
 A CPU host without NVIDIA GPUs, for example:
 
 ```bash
-uv sync --python 3.12 --extra onnx-cpu --extra openvino --extra executorch
+uv sync --python 3.12 --extra onnx-cpu --extra openvino --extra executorch --extra litert
 ```
 
 The `mac` extra installs ONNX Runtime (CPU), OpenVINO, ExecuTorch and Core ML. It works on any Apple silicon Mac:
@@ -103,9 +104,12 @@ Each runtime times the smallest call that runs the full graph. Preprocessing and
 | ONNX Runtime (GPU) | `run_with_iobinding` | Not included. IOBinding binds GPU buffers. |
 | ONNX Runtime (CPU) | `run_with_iobinding` | None (CPU). |
 | OpenVINO | `InferRequest.infer()` | None (CPU). |
+| LiteRT | `Interpreter.invoke()` | None (CPU). |
 | ExecuTorch | `ExecuTorchMethod.execute()` | None (CPU). With Core ML (`npu`), included. |
 | Core ML | `MLModel.predict()` | Included, with the conversion of the inputs to `MLMultiArray` (a pixel buffer for an image input) and of the outputs to numpy. |
 | Core AI | One call of the inference function | Included. |
+
+A LiteRT artifact can take NHWC input, or quantized int8 input. The runtime converts the input before the timed call, and dequantizes the outputs after it. The conversion is not in the latency.
 
 Core ML and Core AI decide which compute unit runs each op. The `cpu` rows allow only the CPU. The `gpu` and `npu` rows prefer the GPU or the Neural Engine, and the runtime can put the ops that this unit does not support on the CPU.
 
