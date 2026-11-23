@@ -61,7 +61,8 @@ def _to_artifact_form(feature: _Feature, tensor: torch.Tensor):
 class CoreMLRuntime(Runtime):
     """Runs a Core ML artifact. The timed call is `MLModel.predict()`.
 
-    The timed call includes the conversion of the inputs to `MLMultiArray` and of the outputs
+    The timed call includes the conversion of the inputs to `MLMultiArray`, or to a pixel buffer for an
+    image input, and of the outputs
     back to numpy, because Core ML gives no smaller call. On gpu and npu, Core ML runs the
     operations that the device does not support on the CPU. An image-type input scales its pixels
     inside the model, so it takes 0-255 values: its rows set `normalized_in_graph`.

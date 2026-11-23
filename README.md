@@ -58,6 +58,12 @@ Other hosts install the extra for each runtime they need:
 
 The `nvidia` extra now includes `openvino`, so `benchmark_all` also runs the OpenVINO CPU rows. These rows take most of the run time. To run only the TensorRT and ONNX Runtime rows, add `--runtimes=tensorrt,onnxruntime`.
 
+A CPU host without NVIDIA GPUs, for example:
+
+```bash
+uv sync --python 3.12 --extra onnx-cpu --extra openvino --extra executorch
+```
+
 The `mac` extra installs ONNX Runtime (CPU), OpenVINO, ExecuTorch and Core ML. It works on any Apple silicon Mac:
 
 ```bash
@@ -98,7 +104,7 @@ Each runtime times the smallest call that runs the full graph. Preprocessing and
 | ONNX Runtime (CPU) | `run_with_iobinding` | None (CPU). |
 | OpenVINO | `InferRequest.infer()` | None (CPU). |
 | ExecuTorch | `ExecuTorchMethod.execute()` | None (CPU). With Core ML (`npu`), included. |
-| Core ML | `MLModel.predict()` | Included, with the conversion of the inputs to `MLMultiArray` and of the outputs to numpy. |
+| Core ML | `MLModel.predict()` | Included, with the conversion of the inputs to `MLMultiArray` (a pixel buffer for an image input) and of the outputs to numpy. |
 | Core AI | One call of the inference function | Included. |
 
 Core ML and Core AI decide which compute unit runs each op. The `cpu` rows allow only the CPU. The `gpu` and `npu` rows prefer the GPU or the Neural Engine, and the runtime can put the ops that this unit does not support on the CPU.

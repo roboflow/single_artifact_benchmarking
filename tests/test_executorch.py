@@ -79,6 +79,15 @@ def test_each_device_needs_its_backend_in_the_installed_executorch(monkeypatch, 
     assert not ExecuTorchRuntime.is_available("gpu")
 
 
+def test_an_executorch_that_does_not_import_is_not_available(monkeypatch):
+    def fail_to_import():
+        raise ImportError("no executorch")
+
+    monkeypatch.setattr(executorch_runtime, "_registered_backends", fail_to_import)
+
+    assert not ExecuTorchRuntime.is_available("cpu")
+
+
 def test_cpu_is_available_with_the_installed_executorch():
     assert ExecuTorchRuntime.is_available("cpu")
 
