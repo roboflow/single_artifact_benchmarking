@@ -66,7 +66,9 @@ def test_gpu_run_matches_the_model(tmp_path, use_cuda_graph):
 
     torch.testing.assert_close(outputs["boxes"], images * 2)
     assert outputs["labels"].tolist() == [[11, 21]]
-    assert (tmp_path / "m.engine").exists()
+    import tensorrt
+
+    assert (tmp_path / f"m.trt{tensorrt.__version__}.engine").exists()
 
 
 @requires_tensorrt
