@@ -40,6 +40,18 @@ def double_graph(shape=(1, 3, 4, 4)):
     return helper.make_graph([node], "double", [images], [outputs], [two])
 
 
+def double_graph_with_identity_output():
+    """An output behind a no-op node. At f32, compilation merges the inner tensor name into the output port."""
+    images = helper.make_tensor_value_info("images", TensorProto.FLOAT, [1, 3, 4, 4])
+    outputs = helper.make_tensor_value_info("outputs", TensorProto.FLOAT, [1, 3, 4, 4])
+    two = helper.make_tensor("two", TensorProto.FLOAT, [], [2.0])
+    nodes = [
+        helper.make_node("Mul", ["images", "two"], ["/model/Mul_output_0"]),
+        helper.make_node("Identity", ["/model/Mul_output_0"], ["outputs"]),
+    ]
+    return helper.make_graph(nodes, "double_identity", [images], [outputs], [two])
+
+
 def two_input_graph():
     images = helper.make_tensor_value_info("images", TensorProto.FLOAT, [1, 3, 4, 4])
     sizes = helper.make_tensor_value_info("orig_target_sizes", TensorProto.INT64, [1, 2])
@@ -92,6 +104,18 @@ def test_run_gives_numerically_correct_outputs_that_own_their_memory(tmp_path):
     runtime.run({"images": torch.zeros(1, 3, 4, 4)})
 
     torch.testing.assert_close(first, images * 2)
+
+
+def test_outputs_keep_their_onnx_names_when_compilation_removes_a_no_op_node(tmp_path):
+    onnx_path = tmp_path / "model.onnx"
+    model = helper.make_model(double_graph_with_identity_output(), opset_imports=[helper.make_opsetid("", 17)], ir_version=8)
+    onnx.save(model, str(onnx_path))
+    runtime = OpenVINORuntime(str(onnx_path), "cpu", "fp32")
+
+    outputs = runtime.run({"images": torch.ones(1, 3, 4, 4)})
+
+    assert list(outputs) == ["outputs"]
+    assert torch.equal(outputs["outputs"], torch.full((1, 3, 4, 4), 2.0))
 
 
 def test_a_directory_must_hold_exactly_one_xml_file(tmp_path):
