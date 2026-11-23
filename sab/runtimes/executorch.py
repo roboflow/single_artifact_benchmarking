@@ -37,7 +37,7 @@ def _input_name(index: int) -> str:
 
 
 class ExecuTorchRuntime(Runtime):
-    """Runs a `.pte` artifact. The timed call is `Method.execute`.
+    """Runs a `.pte` artifact. The timed call is `ExecuTorchMethod.execute`.
 
     A `.pte` has no input names, so inputs are named by position: `input0`, `input1`, and so on.
     Outputs are named `output0`, `output1`, and so on. The artifact fixes the backend and its compute
@@ -54,9 +54,11 @@ class ExecuTorchRuntime(Runtime):
         self.input_device = "cpu"
         self.profiler = CPUProfiler()
         program = ExecuTorch.get().load_program(artifact_path)
-        self.method = program.load_method(method_name)
+        # The public `Method.execute` also sets the inputs and copies the outputs. The pybind method
+        # under it does each step in its own call, so the timer holds only the graph run.
+        self.method = program.load_method(method_name)._method
 
-        metadata = self.method.metadata
+        metadata = self.method.method_meta()
         input_infos = [metadata.input_tensor_meta(i) for i in range(metadata.num_inputs())]
         self._input_shapes = [tuple(info.sizes()) for info in input_infos]
         self._input_dtypes = [_DTYPES[info.dtype()] for info in input_infos]
@@ -81,12 +83,12 @@ class ExecuTorchRuntime(Runtime):
 
     def run(self, inputs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         arguments = self._to_artifact_inputs(inputs)
+        self.method.set_inputs(arguments)
 
         with self.profiler.profile():
-            raw_outputs = self.method.execute(arguments)
+            self.method.execute()
 
-        # ExecuTorch can reuse its output buffers on the next call, so each caller gets its own copy.
-        return {f"output{i}": output.detach().clone() for i, output in enumerate(raw_outputs)}
+        return {f"output{i}": output for i, output in enumerate(self.method.get_outputs(clone_outputs=True))}
 
     def warmup(self, num_iterations: int = WARMUP_ITERATIONS):
         """Run zeros through the method to warm the caches before real measurements begin."""
@@ -94,8 +96,9 @@ class ExecuTorchRuntime(Runtime):
             torch.zeros(shape, dtype=dtype)
             for shape, dtype in zip(self._input_shapes, self._input_dtypes)
         ]
+        self.method.set_inputs(zeros)
         for _ in range(num_iterations):
-            self.method.execute(zeros)
+            self.method.execute()
         self.profiler.reset()
 
     def _find_image_input(self) -> int:
