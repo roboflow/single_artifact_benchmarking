@@ -53,12 +53,31 @@ Other hosts install the extra for each runtime they need:
 |---|---|---|
 | `openvino` | `OpenVINORuntime` | Any CPU host. |
 | `litert` | `LiteRTRuntime` | Any CPU host. |
+| `executorch` | `ExecuTorchRuntime` | Any CPU host. On macOS, it also runs Core ML programs on the `npu` device. |
+| `coreml` | `CoreMLRuntime` | macOS. |
+| `coreai` | `CoreAIRuntime` | macOS 27 on Apple silicon. |
 
 The `nvidia` extra now includes `openvino`, so `benchmark_all` also runs the OpenVINO CPU rows. These rows take most of the run time. To run only the TensorRT and ONNX Runtime rows, add `--runtimes=tensorrt,onnxruntime`.
 
+A CPU host without NVIDIA GPUs, for example:
+
 ```bash
-uv sync --python 3.12 --extra openvino --extra litert
+uv sync --python 3.12 --extra onnx-cpu --extra openvino --extra executorch --extra litert
 ```
+
+The `mac` extra installs ONNX Runtime (CPU), OpenVINO, ExecuTorch and Core ML. It works on any Apple silicon Mac:
+
+```bash
+uv sync --python 3.12 --extra mac
+```
+
+On macOS 27, add the `coreai` extra for Core AI. The `coreai-core` wheels exist only for macOS 26 and later, so `--extra mac` does not include them:
+
+```bash
+uv sync --python 3.12 --extra mac --extra coreai
+```
+
+The benchmark scripts have rows only for the `.onnx` artifacts in the bucket. TensorRT, ONNX Runtime and OpenVINO read these files directly. The LiteRT, ExecuTorch, Core ML and Core AI runtimes need exported artifacts, so the scripts have no rows for them. To benchmark such an artifact, give its `ArtifactBenchmarkRequest` to `run_benchmark_on_artifacts`.
 
 ### Options
 
@@ -86,8 +105,13 @@ Each runtime times the smallest call that runs the full graph. Preprocessing and
 | ONNX Runtime (CPU) | `run_with_iobinding` | None (CPU). |
 | OpenVINO | `InferRequest.infer()` | None (CPU). |
 | LiteRT | `Interpreter.invoke()` | None (CPU). |
+| ExecuTorch | `ExecuTorchMethod.execute()` | None (CPU). With Core ML (`npu`), included. |
+| Core ML | `MLModel.predict()` | Included, with the conversion of the inputs to `MLMultiArray` (a pixel buffer for an image input) and of the outputs to numpy. |
+| Core AI | One call of the inference function | Included. |
 
 A LiteRT artifact can take NHWC input, or quantized int8 input. The runtime converts the input before the timed call, and dequantizes the outputs after it. The conversion is not in the latency.
+
+Core ML and Core AI decide which compute unit runs each op. The `cpu` rows allow only the CPU. The `gpu` and `npu` rows prefer the GPU or the Neural Engine, and the runtime can put the ops that this unit does not support on the CPU.
 
 OpenVINO rows read the existing `.onnx` files and compile them on the host, as TensorRT rows do. They set `INFERENCE_PRECISION_HINT` from the precision of the row. On a CPU with no native fp16, the fp16 rows are skipped, because OpenVINO compiles them in f32.
 
@@ -97,6 +121,7 @@ OpenVINO rows read the existing `.onnx` files and compile them on the host, as T
 |---|---|
 | NVIDIA GPU | NVML clock events. SAB locks the clocks to their maximum during the run. |
 | x86 Linux CPU | Core frequencies from `/sys/devices/system/cpu/cpu*/cpufreq`, polled while the model runs. |
+| Mac (all devices) | `ProcessInfo.thermalState`, polled during the run. `serious` or higher counts as throttling, because Apple places the performance impact there. |
 | Other | None. The `Throttled` column shows `?`. |
 
 SAB reads the core frequencies only while the model runs. Between images, a scaling governor such as `schedutil` slows the idle cores, and SAB does not count that as throttling. The baseline is the first frequency read during an inference.
