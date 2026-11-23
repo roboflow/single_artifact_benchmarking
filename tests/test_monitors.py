@@ -86,8 +86,9 @@ class TestCpufreqMonitor:
 NOMINAL, FAIR, SERIOUS = 0, 1, 2
 
 
-def make_thermal_monitor(*states) -> ThermalStateMonitor:
-    return ThermalStateMonitor(poll_interval_s=0.001, read_state=scripted_reader(*states))
+def make_thermal_monitor(*states, poll_interval_s: float = 3600.0) -> ThermalStateMonitor:
+    """The long default interval keeps the background thread idle, so the tests poll by hand."""
+    return ThermalStateMonitor(poll_interval_s=poll_interval_s, read_state=scripted_reader(*states))
 
 
 def thermal_verdict_after_polls(*states, polls: int) -> bool | None:
@@ -106,14 +107,17 @@ class TestThermalStateMonitor:
         assert monitor.did_throttle() is None
         assert monitor.summary() == {}
 
-    def test_state_that_rises_to_fair_during_the_run_throttles(self):
-        assert thermal_verdict_after_polls(NOMINAL, NOMINAL, FAIR, polls=2) is True
+    def test_state_that_rises_to_serious_during_the_run_throttles(self):
+        assert thermal_verdict_after_polls(NOMINAL, NOMINAL, SERIOUS, polls=2) is True
+
+    def test_fair_does_not_throttle(self):
+        assert thermal_verdict_after_polls(FAIR, FAIR, polls=2) is False
 
     def test_nominal_throughout_does_not_throttle(self):
         assert thermal_verdict_after_polls(NOMINAL, polls=3) is False
 
-    def test_already_fair_at_enter_counts_as_throttled(self):
-        assert thermal_verdict_after_polls(FAIR, NOMINAL, polls=1) is True
+    def test_already_serious_at_enter_counts_as_throttled(self):
+        assert thermal_verdict_after_polls(SERIOUS, NOMINAL, polls=1) is True
 
     def test_failed_poll_during_the_run_is_skipped(self):
         monitor = make_thermal_monitor(NOMINAL, OSError("gone"), SERIOUS)
@@ -123,11 +127,13 @@ class TestThermalStateMonitor:
         assert monitor.summary() == {"start_state": "nominal", "max_state": "serious", "samples": 1}
 
     def test_background_thread_polls_and_stops_on_exit(self):
-        monitor = make_thermal_monitor(NOMINAL, FAIR)
+        monitor = make_thermal_monitor(NOMINAL, SERIOUS, poll_interval_s=0.001)
+        deadline = time.monotonic() + 5.0
         with monitor:
             while monitor.summary()["samples"] == 0:
-                pass
+                assert time.monotonic() < deadline, "the thread did not poll"
         samples_at_exit = monitor.summary()["samples"]
+        time.sleep(0.01)
         assert monitor.did_throttle() is True
         assert monitor.summary()["samples"] == samples_at_exit
 

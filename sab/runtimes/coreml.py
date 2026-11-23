@@ -28,7 +28,8 @@ def _read_feature(input_description) -> _Feature:
         array_type = input_description.type.multiArrayType
         dtypes = {
             ArrayFeatureType.FLOAT32: np.float32,
-            ArrayFeatureType.FLOAT16: np.float16,
+            # coremltools converts a float16 array to float32 inside predict(), so the runtime feeds float32.
+            ArrayFeatureType.FLOAT16: np.float32,
             ArrayFeatureType.DOUBLE: np.float64,
             ArrayFeatureType.INT32: np.int32,
         }

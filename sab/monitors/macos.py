@@ -7,7 +7,7 @@ from typing import Callable, Self
 
 FOUNDATION_PATH = "/System/Library/Frameworks/Foundation.framework/Foundation"
 STATE_NAMES = ("nominal", "fair", "serious", "critical")
-FAIR = 1
+SERIOUS = 2
 
 StateReader = Callable[[], int]
 
@@ -50,10 +50,10 @@ def read_thermal_state() -> int:
 
 
 class ThermalStateMonitor:
-    """Polls the system thermal state during the run. Fair or higher counts as throttling.
+    """Polls the system thermal state during the run. Serious or higher counts as throttling.
 
-    macOS derives thermalState from the system thermal pressure level. At moderate pressure (fair), the system
-    already limits the CPU and GPU clocks. Apple Silicon has no per-core frequency that a normal user can read.
+    Apple places the performance impact of thermal pressure at serious. At fair, it asks apps only to reduce
+    optional work. Apple Silicon has no per-core frequency that a normal user can read.
 
     The verdict is None when the state is not readable at enter, for example on Linux.
     """
@@ -107,7 +107,7 @@ class ThermalStateMonitor:
     def did_throttle(self) -> bool | None:
         if self._start_state is None:
             return None
-        return self._max_state >= FAIR
+        return self._max_state >= SERIOUS
 
     def summary(self) -> dict:
         if self._start_state is None:

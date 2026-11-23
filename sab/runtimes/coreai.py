@@ -78,6 +78,9 @@ class CoreAIRuntime(Runtime):
             import coreai.runtime as rt
         except ImportError:
             return False
+        # Before macOS 27, coreai-core falls back to its own runtime, which cannot load with specialization options.
+        if not rt.SpecializationOptions.is_supported():
+            return False
         return _COMPUTE_UNIT_KINDS[device] in {str(kind) for kind in rt.ComputeUnitKind.available_kinds()}
 
     @classmethod

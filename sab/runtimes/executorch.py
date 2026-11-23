@@ -27,9 +27,9 @@ _BACKENDS = {"cpu": "XnnpackBackend", "npu": "CoreMLBackend"}
 
 
 def _registered_backends() -> set[str]:
-    from executorch.extension.pybindings import portable_lib
+    from executorch.runtime import Runtime as ExecuTorch
 
-    return set(portable_lib._get_registered_backend_names())
+    return set(ExecuTorch.get().backend_registry.registered_backend_names)
 
 
 def _input_name(index: int) -> str:
@@ -74,7 +74,7 @@ class ExecuTorchRuntime(Runtime):
             return False
         try:
             return _BACKENDS[device] in _registered_backends()
-        except (ImportError, AttributeError):
+        except ImportError:
             return False
 
     @classmethod

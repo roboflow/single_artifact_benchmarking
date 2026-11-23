@@ -111,7 +111,7 @@ OpenVINO rows read the existing `.onnx` files and compile them on the host, as T
 |---|---|
 | NVIDIA GPU | NVML clock events. SAB locks the clocks to their maximum during the run. |
 | x86 Linux CPU | Core frequencies from `/sys/devices/system/cpu/cpu*/cpufreq`, polled while the model runs. |
-| Mac (all devices) | `ProcessInfo.thermalState`, polled during the run. `fair` or higher counts as throttling, because macOS then limits the clocks. |
+| Mac (all devices) | `ProcessInfo.thermalState`, polled during the run. `serious` or higher counts as throttling, because Apple places the performance impact there. |
 | Other | None. The `Throttled` column shows `?`. |
 
 SAB reads the core frequencies only while the model runs. Between images, a scaling governor such as `schedutil` slows the idle cores, and SAB does not count that as throttling. The baseline is the first frequency read during an inference.

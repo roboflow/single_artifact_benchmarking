@@ -89,6 +89,9 @@ def test_is_available_needs_macos_a_known_device_and_that_compute_unit(monkeypat
     assert CoreAIRuntime.is_available("cpu")
     assert not CoreAIRuntime.is_available("npu")
 
+    monkeypatch.setattr(rt.SpecializationOptions, "is_supported", staticmethod(lambda: False))
+    assert not CoreAIRuntime.is_available("cpu")
+
     monkeypatch.setattr(sys, "platform", "linux")
     assert not CoreAIRuntime.is_available("cpu")
 

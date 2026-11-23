@@ -128,13 +128,17 @@ def test_extra_int32_input_reaches_the_model_with_its_values(image_and_sizes_mod
     assert outputs["labels"].tolist() == [[641, 481]]
 
 
-def test_float16_input_takes_a_float32_tensor(float16_model):
+def test_float16_input_takes_a_float32_tensor_and_is_fed_as_float32(float16_model):
     runtime = CoreMLRuntime(float16_model, "cpu", "fp16")
     images = torch.rand(1, 3, SIDE, SIDE)
+    fed_dtypes = []
+    predict = runtime.model.predict
+    runtime.model.predict = lambda feed: fed_dtypes.append(feed["images"].dtype) or predict(feed)
 
     outputs = runtime.run({"images": images})["outputs"]
 
     torch.testing.assert_close(outputs.float(), images * 2, atol=1e-2, rtol=1e-2)
+    assert fed_dtypes == [np.float32]  # a float16 feed is converted again inside the timed predict()
 
 
 def test_warmup_leaves_no_timings_and_each_run_adds_one(double_model):
