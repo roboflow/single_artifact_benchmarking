@@ -47,6 +47,18 @@ SAB uses [uv](https://docs.astral.sh/uv/). Each host installs the extra for its 
    uv run python -m sab.models.benchmark_rfdetr <path to coco val dir> <path to coco val annotations>
    ```
 
+Other hosts install the extra for each runtime they need:
+
+| Extra | Adds | Host |
+|---|---|---|
+| `openvino` | `OpenVINORuntime` | Any CPU host. |
+
+The `nvidia` extra now includes `openvino`, so `benchmark_all` also runs the OpenVINO CPU rows. These rows take most of the run time. To run only the TensorRT and ONNX Runtime rows, add `--runtimes=tensorrt,onnxruntime`.
+
+```bash
+uv sync --python 3.12 --extra openvino
+```
+
 ### Options
 
 `benchmark_all` and each script accept these flags:
@@ -71,6 +83,9 @@ Each runtime times the smallest call that runs the full graph. Preprocessing and
 | TensorRT | CUDA graph replay, or `execute_async_v3` | Not included. The input is already in GPU memory. |
 | ONNX Runtime (GPU) | `run_with_iobinding` | Not included. IOBinding binds GPU buffers. |
 | ONNX Runtime (CPU) | `run_with_iobinding` | None (CPU). |
+| OpenVINO | `InferRequest.infer()` | None (CPU). |
+
+OpenVINO rows read the existing `.onnx` files and compile them on the host, as TensorRT rows do. They set `INFERENCE_PRECISION_HINT` from the precision of the row. On a CPU with no native fp16, the fp16 rows are skipped, because OpenVINO compiles them in f32.
 
 ### Throttle detection
 
