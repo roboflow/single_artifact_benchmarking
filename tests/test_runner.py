@@ -156,9 +156,10 @@ def test_runs_every_request_and_saves_the_rows(harness, tmp_path):
     assert load_results(str(output)) == rows
 
 
-def test_a_run_that_stores_no_row_still_writes_the_file(harness, tmp_path):
+@pytest.mark.parametrize("requests", [[], [make_request("a.onnx", runtime=OtherRuntime)]], ids=["no-requests", "all-filtered-out"])
+def test_a_run_that_stores_no_row_still_writes_the_file(harness, tmp_path, requests):
     output = tmp_path / "out.json"
-    run_many([make_request("a.onnx", runtime=OtherRuntime)], output, runtimes="fake")
+    run_many(requests, output, runtimes="fake")
     assert json.loads(output.read_text()) == []
 
 
