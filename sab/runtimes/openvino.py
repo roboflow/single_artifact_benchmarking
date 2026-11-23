@@ -65,7 +65,8 @@ class OpenVINORuntime(Runtime):
 
         core = ov.Core()
         model = core.read_model(str(_find_xml(artifact_path)))
-        # Compilation can give an input port another `any_name`, so the names come from the model.
+        # Compilation can give a port another `any_name`, for example when it removes a no-op node
+        # before an output. So the input and output names come from the model, not the compiled model.
         self._input_names = [port.any_name for port in model.inputs]
         image_name = pick_image_input(self._input_names, image_input_name)
         if input_shape is not None:
@@ -97,7 +98,10 @@ class OpenVINORuntime(Runtime):
         input_ports = dict(zip(self._input_names, self.compiled_model.inputs))
         self._input_dtypes = {name: port.get_element_type().to_dtype() for name, port in input_ports.items()}
         self._input_shapes = {name: _static_shape(port.get_partial_shape()) for name, port in input_ports.items()}
-        self._outputs = [(_output_name(port, index), port) for index, port in enumerate(self.compiled_model.outputs)]
+        self._outputs = [
+            (_output_name(model_port, index), compiled_port)
+            for index, (model_port, compiled_port) in enumerate(zip(model.outputs, self.compiled_model.outputs))
+        ]
 
         self.input_spec = InputSpec(name=image_name, shape=self._input_shapes[image_name])
 
