@@ -85,7 +85,7 @@ Each runtime times the smallest call that runs the full graph. Preprocessing and
 | ONNX Runtime (GPU) | `run_with_iobinding` | Not included. IOBinding binds GPU buffers. |
 | ONNX Runtime (CPU) | `run_with_iobinding` | None (CPU). |
 | OpenVINO | `InferRequest.infer()` | None (CPU). |
-| ExecuTorch | `Method.execute()` | None (CPU). |
+| ExecuTorch | `ExecuTorchMethod.execute()` | None (CPU). |
 
 OpenVINO rows read the existing `.onnx` files and compile them on the host, as TensorRT rows do. They set `INFERENCE_PRECISION_HINT` from the precision of the row. On a CPU with no native fp16, the fp16 rows are skipped, because OpenVINO compiles them in f32.
 
