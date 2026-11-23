@@ -96,8 +96,9 @@ class ExecuTorchRuntime(Runtime):
             torch.zeros(shape, dtype=dtype)
             for shape, dtype in zip(self._input_shapes, self._input_dtypes)
         ]
-        self.method.set_inputs(zeros)
         for _ in range(num_iterations):
+            # A memory plan can reuse the input region after the last read, so each run sets the inputs again.
+            self.method.set_inputs(zeros)
             self.method.execute()
         self.profiler.reset()
 
