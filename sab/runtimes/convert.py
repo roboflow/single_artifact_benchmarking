@@ -49,9 +49,11 @@ def to_artifact_input(
     if np.issubdtype(dtype, np.integer) and tensor.is_floating_point():
         if quantization is not None:
             scale, zero_point = quantization
-            tensor = tensor / scale + zero_point
+            tensor = _round_half_away_from_zero(tensor / scale) + zero_point
+        else:
+            tensor = _round_half_away_from_zero(tensor)
         limits = np.iinfo(dtype)
-        tensor = _round_half_away_from_zero(tensor).clamp(limits.min, limits.max)
+        tensor = tensor.clamp(limits.min, limits.max)
 
     return np.ascontiguousarray(tensor.numpy().astype(dtype))
 

@@ -30,11 +30,11 @@ def test_nhwc_input_round_trips_to_the_canonical_nchw_tensor():
 
 
 def test_integer_input_without_quantization_rounds_and_clips():
-    tensor = torch.tensor([[[[-20.0, 0.4, 0.6, 127.5, 254.6, 300.0]]]])
+    tensor = torch.tensor([[[[-20.0, 0.4, 0.6, 126.5, 254.6, 300.0]]]])
 
     array = to_artifact_input(tensor, "NCHW", np.uint8)
 
-    assert array.flatten().tolist() == [0, 0, 1, 128, 255, 255]  # 127.5 rounds to the even value 128
+    assert array.flatten().tolist() == [0, 0, 1, 127, 255, 255]  # a tie rounds away from zero; ties-to-even gives 126
 
 
 @pytest.mark.parametrize(
@@ -57,6 +57,14 @@ def test_quantization_rounds_a_tie_away_from_zero_like_tflite():
     array = to_artifact_input(tensor, "NCHW", np.int8, quantization=(1.0, 0))
 
     assert array.flatten().tolist() == [3, -3, 4, -4]  # round-half-to-even gives 2, -2, 4, -4
+
+
+def test_quantization_rounds_before_it_adds_the_zero_point_like_tflite():
+    tensor = torch.tensor([[[[2.5, -2.5]]]])
+
+    array = to_artifact_input(tensor, "NCHW", np.int8, quantization=(1.0, -10))
+
+    assert array.flatten().tolist() == [-7, -13]  # rounding after the zero point gives -8, -13
 
 
 @pytest.mark.parametrize(
