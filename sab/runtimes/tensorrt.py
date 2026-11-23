@@ -7,19 +7,19 @@ import torch
 from sab.profiler import CUDAProfiler
 from sab.runtimes.base import InputSpec, Runtime, pick_image_input
 
-# The fp32 name stays `<stem>.engine`, so engines that earlier runs cached still match.
 _ENGINE_SUFFIXES = {"fp32": ".engine", "fp16": ".fp16.engine", "int8": ".int8.engine"}
 
 # int8 keeps FP16 on: layers without a Q/DQ pair fall back to fp16 instead of fp32.
 _BUILDER_FLAG_NAMES = {"fp32": (), "fp16": ("FP16",), "int8": ("INT8", "FP16")}
 
 
-def engine_path_for(artifact_path: str, precision: str) -> str:
+def engine_path_for(artifact_path: str, precision: str, tensorrt_version: str) -> str:
+    """The engine file next to the artifact. The name holds the TensorRT version, because a plan loads only in the version that built it."""
     if not artifact_path.endswith(".onnx"):
         raise ValueError(f"TensorRT builds engines from .onnx artifacts, got {artifact_path!r}")
     if precision not in _ENGINE_SUFFIXES:
         raise ValueError(f"Unknown precision {precision!r}. Supported: {sorted(_ENGINE_SUFFIXES)}")
-    return artifact_path[: -len(".onnx")] + _ENGINE_SUFFIXES[precision]
+    return f"{artifact_path[: -len('.onnx')]}.trt{tensorrt_version}{_ENGINE_SUFFIXES[precision]}"
 
 
 def builder_flag_names(precision: str) -> tuple[str, ...]:
@@ -89,11 +89,11 @@ def build_engine(model_path, engine_path, precision="fp32"):
     return engine
 
 
-def _ensure_engine(artifact_path: str, precision: str) -> str:
+def _ensure_engine(artifact_path: str, precision: str, tensorrt_version: str) -> str:
     """Give the path of the engine for an ONNX artifact, and build the engine when it is missing."""
     from sab.monitors.nvidia import ThrottleMonitor
 
-    engine_path = engine_path_for(artifact_path, precision)
+    engine_path = engine_path_for(artifact_path, precision, tensorrt_version)
 
     if os.path.exists(engine_path):
         print(f"Engine for {artifact_path} already exists at {engine_path}")
@@ -134,7 +134,7 @@ class TRTRuntime(Runtime):
         import tensorrt as trt
 
         self.input_device = "cuda"
-        engine_path = _ensure_engine(artifact_path, precision)
+        engine_path = _ensure_engine(artifact_path, precision, trt.__version__)
 
         logger = trt.Logger()
         trt.init_libnvinfer_plugins(logger, "")

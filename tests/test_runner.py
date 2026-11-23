@@ -156,6 +156,12 @@ def test_runs_every_request_and_saves_the_rows(harness, tmp_path):
     assert load_results(str(output)) == rows
 
 
+def test_a_run_that_stores_no_row_still_writes_the_file(harness, tmp_path):
+    output = tmp_path / "out.json"
+    run_many([make_request("a.onnx", runtime=OtherRuntime)], output, runtimes="fake")
+    assert json.loads(output.read_text()) == []
+
+
 def test_runtime_filter_matches_by_runtime_name(harness, tmp_path):
     requests = [make_request("a.onnx"), make_request("b.onnx", runtime=OtherRuntime)]
     rows = run_many(requests, tmp_path / "out.json", runtimes="other,trt")
