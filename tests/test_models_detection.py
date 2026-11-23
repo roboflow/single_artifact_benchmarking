@@ -33,36 +33,38 @@ def cpu_row(path: str) -> tuple:
     return (path, "onnxruntime", "cpu", "fp32", None)
 
 
+def openvino_rows(paths) -> list[tuple]:
+    return [(path, "openvino", "cpu", precision, None) for path in paths for precision in ("fp32", "fp16")]
+
+
 def rfdetr_rows() -> list[tuple]:
+    paths = [f"rf-detr-{size}.onnx" for size in ("nano", "small", "medium", "large-new", "xlarge", "xxlarge")]
     rows = []
-    for size in ("nano", "small", "medium"):
-        path = f"rf-detr-{size}.onnx"
+    for path in paths:
         rows += tensorrt_rows(path, True) + [cpu_row(path)]
-    return rows
+    return rows + openvino_rows(paths)
 
 
 def yolov11_rows() -> list[tuple]:
+    paths = [f"yolo11{size}_nms_conf_0.01.onnx" for size in "nsmlx"]
     rows = []
-    for size in "nsmlx":
-        path = f"yolo11{size}_nms_conf_0.01.onnx"
+    for path in paths:
         rows += tensorrt_rows(path, False) + [cpu_row(path)]
-    return rows
+    return rows + openvino_rows(paths)
 
 
 def yolov8_rows() -> list[tuple]:
-    return [
-        row
-        for size in "nsm"
-        for row in tensorrt_rows(f"yolov8{size}_nms_conf_0.01.onnx", False, precisions=("fp16",))
-    ]
+    paths = [f"yolov8{size}_nms_conf_0.01.onnx" for size in "nsm"]
+    rows = [row for path in paths for row in tensorrt_rows(path, False, precisions=("fp16",))]
+    return rows + openvino_rows(paths)
 
 
 def yolo26_rows() -> list[tuple]:
+    paths = [f"yolo26{size}.onnx" for size in "nsmlx"]
     rows = []
-    for size in "nsmlx":
-        path = f"yolo26{size}.onnx"
+    for path in paths:
         rows += tensorrt_rows(path, True) + [cpu_row(path)]
-    return rows
+    return rows + openvino_rows(paths)
 
 
 def lwdetr_rows() -> list[tuple]:
@@ -103,12 +105,10 @@ REMAPPED = {"yolov11", "yolov8", "yolo26"}
 
 
 @pytest.mark.parametrize("family", EXPECTED_ROWS)
-def test_build_requests_reproduces_the_old_rows(family):
+def test_build_requests_gives_the_expected_rows(family):
     requests = build(family, buffer_time=0.25)
 
-    expected = EXPECTED_ROWS[family]()
-
-    assert [describe(request) for request in requests[: len(expected)]] == expected
+    assert [describe(request) for request in requests] == EXPECTED_ROWS[family]()
     processor = getattr(load(family), PROCESSOR_NAMES[family])
     max_dets = 500 if family == "yololite" else 100
     assert {

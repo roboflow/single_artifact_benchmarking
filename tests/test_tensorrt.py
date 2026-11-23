@@ -15,21 +15,21 @@ def requires_tensorrt(test):
 @pytest.mark.parametrize(
     "artifact_path, precision, engine_path",
     [
-        ("cache/model.onnx", "fp32", "cache/model.engine"),
-        ("cache/model.onnx", "fp16", "cache/model.fp16.engine"),
-        ("cache/model.onnx", "int8", "cache/model.int8.engine"),
-        ("dfine_n_coco.opset17.onnx", "fp16", "dfine_n_coco.opset17.fp16.engine"),
+        ("cache/model.onnx", "fp32", "cache/model.trt10.16.1.11.engine"),
+        ("cache/model.onnx", "fp16", "cache/model.trt10.16.1.11.fp16.engine"),
+        ("cache/model.onnx", "int8", "cache/model.trt10.16.1.11.int8.engine"),
+        ("dfine_n_coco.opset17.onnx", "fp16", "dfine_n_coco.opset17.trt10.16.1.11.fp16.engine"),
     ],
 )
-def test_engine_path_names_the_precision(artifact_path, precision, engine_path):
-    assert engine_path_for(artifact_path, precision) == engine_path
+def test_engine_path_names_the_tensorrt_version_and_the_precision(artifact_path, precision, engine_path):
+    assert engine_path_for(artifact_path, precision, "10.16.1.11") == engine_path
 
 
 def test_engine_path_rejects_a_file_that_is_not_onnx_and_an_unknown_precision():
     with pytest.raises(ValueError, match="onnx"):
-        engine_path_for("model.tflite", "fp32")
+        engine_path_for("model.tflite", "fp32", "10.16.1.11")
     with pytest.raises(ValueError, match="bf16"):
-        engine_path_for("model.onnx", "bf16")
+        engine_path_for("model.onnx", "bf16", "10.16.1.11")
 
 
 def test_builder_flags_per_precision():

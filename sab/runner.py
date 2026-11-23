@@ -97,6 +97,7 @@ def run_benchmark_on_artifacts(
 ) -> list[dict]:
     """Run each request and rewrite `output_file` after every row.
 
+    The file exists after the call even when no row ran, because `benchmark_all` reads it for every script.
     Rows already in the file stay, and a row with the same key is not run again unless `rerun` is set.
     Returns the rows for these requests, in order.
     """
@@ -148,4 +149,5 @@ def run_benchmark_on_artifacts(
         store(row)
         rows.append(row)
 
+    save_results(output_file, stored_rows)
     return rows
