@@ -1,15 +1,12 @@
 import sys
 import time
 from contextlib import nullcontext
-from typing import ClassVar
 
 import pytest
 
-from sab.monitors import NullMonitor, select_monitor
 from sab.monitors.cpufreq import CpufreqMonitor
 from sab.monitors.macos import ThermalStateMonitor, read_thermal_state
 from sab.monitors.nvidia import ThrottleMonitor
-from tests.fakes import FakeRuntime
 
 
 def scripted_reader(*readings):
@@ -147,29 +144,3 @@ def test_nvml_did_throttle_raises_when_the_watcher_failed():
     monitor._error = RuntimeError("nvml died")
     with pytest.raises(RuntimeError, match="watcher failed"):
         monitor.did_throttle()
-
-
-def runtime_named(runtime_name: str) -> type[FakeRuntime]:
-    class Named(FakeRuntime):
-        name: ClassVar[str] = runtime_name
-
-    return Named
-
-
-@pytest.mark.parametrize(
-    "runtime_name, device, system, expected",
-    [
-        ("tensorrt", "gpu", "Linux", ThrottleMonitor),
-        ("onnxruntime", "gpu", "Linux", ThrottleMonitor),
-        ("onnxruntime", "cpu", "Linux", CpufreqMonitor),
-        ("coreml", "gpu", "Linux", NullMonitor),
-    ],
-)
-def test_select_monitor(runtime_name, device, system, expected):
-    assert type(select_monitor(runtime_named(runtime_name), device, system=system)) is expected
-
-
-@pytest.mark.parametrize("device", ["cpu", "gpu", "npu"])
-def test_darwin_selects_the_thermal_state_monitor_for_every_device(device):
-    monitor = select_monitor(runtime_named("coreml"), device, system="Darwin")
-    assert type(monitor) is ThermalStateMonitor

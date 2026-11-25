@@ -3,9 +3,8 @@ from typing import Iterable
 
 from sab.artifacts import ensure_artifact
 from sab.evaluation import evaluate
-from sab.host import host_info
+from sab.hosts import host_info, select_monitor
 from sab.models.utils import get_coco_class_index_mapping
-from sab.monitors import select_monitor
 from sab.processors import Pipeline
 from sab.request import ArtifactBenchmarkRequest
 from sab.results import load_results, result_key, save_results
