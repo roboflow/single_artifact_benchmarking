@@ -107,7 +107,7 @@ def saved_paths(output) -> list[str]:
 
 @pytest.mark.parametrize("device", ["cpu", "gpu"])
 def test_the_host_record_of_a_row_describes_the_device_of_that_row(harness, monkeypatch, device):
-    monkeypatch.setattr(runner, "host_info", lambda runtime, row_device: {"device": row_device})
+    monkeypatch.setattr(runner, "host_info", lambda runtime, device: {"device": device})
     row = run_benchmark_on_artifact(make_request(device=device), "images", "ann.json")
     assert row["host"] == {"device": device}
 

@@ -11,7 +11,7 @@ from sab.runtimes.base import Runtime
 def detect_host(system: str | None = None) -> Host:
     """The platform of this machine. `system` is a platform.system() name, injectable for tests.
 
-    An OS with no platform of its own gets LinuxHost. Its Linux-only sources (cpuinfo, cpufreq) give "unknown" there.
+    An OS with no platform of its own gets LinuxHost. Its Linux-only sources give no CPU name and no CPU throttle verdict there.
     """
     system = system or platform.system()
     if system == "Darwin":

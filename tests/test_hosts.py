@@ -1,4 +1,3 @@
-import platform
 from typing import ClassVar
 
 import pytest
@@ -90,10 +89,12 @@ def test_the_accelerator_on_macos_is_the_chip_only_for_a_gpu_or_npu_row(device, 
     assert info["cpu"] == "Apple M4 Pro"
 
 
-def test_host_info_detects_the_platform_from_the_system_reader(monkeypatch):
+@pytest.mark.parametrize("system, expected_cpu", [("Darwin", "Apple M4 Pro"), ("Linux", "Intel(R) Xeon(R) Gold 6248")])
+def test_host_info_detects_the_platform_from_the_system_reader(monkeypatch, system, expected_cpu):
     monkeypatch.setattr(hosts, "MacHost", lambda: MacHost(read_sysctl=lambda key: "Apple M4 Pro"))
-    info = host_info(FakeRuntime, "gpu", system=lambda: ("Darwin", "27.0.0"))
-    assert info["cpu"] == "Apple M4 Pro"
+    monkeypatch.setattr(hosts, "LinuxHost", lambda: LinuxHost(read_cpuinfo=lambda: CPUINFO_X86))
+    info = host_info(FakeRuntime, "cpu", system=lambda: (system, "1.0"))
+    assert info["cpu"] == expected_cpu
 
 
 @pytest.mark.parametrize("system, expected", [("Darwin", MacHost), ("Linux", LinuxHost), ("Windows", LinuxHost)])
@@ -127,6 +128,7 @@ def test_macos_selects_the_thermal_state_monitor_for_every_device(device):
     assert type(select_monitor(runtime_named("coreml"), device, host=MacHost())) is ThermalStateMonitor
 
 
-def test_select_monitor_detects_the_platform_of_this_machine():
-    expected = ThermalStateMonitor if platform.system() == "Darwin" else CpufreqMonitor
+@pytest.mark.parametrize("system, expected", [("Darwin", ThermalStateMonitor), ("Linux", CpufreqMonitor)])
+def test_select_monitor_detects_the_platform(monkeypatch, system, expected):
+    monkeypatch.setattr(hosts.platform, "system", lambda: system)
     assert type(select_monitor(runtime_named("onnxruntime"), "cpu")) is expected
