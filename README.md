@@ -77,6 +77,33 @@ On macOS 27, add the `coreai` extra for Core AI. The `coreai-core` wheels exist 
 uv sync --python 3.12 --extra mac --extra coreai
 ```
 
+#### Jetson
+
+SAB supports JetPack 6.2 (Python 3.10) and JetPack 7.2 (Python 3.12). PyPI has no Jetson builds of torch with CUDA, ONNX Runtime with CUDA, or TensorRT. Thus, do not use `uv sync` on a Jetson. Use a Python environment that already has these three packages, and install SAB into it. `uv` keeps the installed packages:
+
+```bash
+uv pip install --system ".[openvino]"
+python3 -m sab.benchmark_all <path to coco val dir> <path to coco val annotations>
+```
+
+The Roboflow Inference server image for each JetPack is such an environment. For example, on JetPack 6.2:
+
+```bash
+docker run --rm -it --runtime nvidia -v "$PWD":/sab -w /sab --entrypoint bash roboflow/roboflow-inference-server-jetson-6.2.0
+```
+
+SAB does not set the Jetson clocks. Before a run, set the maximum power mode and the maximum clocks on the host:
+
+```bash
+sudo nvpmodel -m 0
+```
+
+```bash
+sudo jetson_clocks
+```
+
+The results file records the board, the L4T release and the power mode.
+
 The benchmark scripts have rows only for the `.onnx` artifacts in the bucket. TensorRT, ONNX Runtime and OpenVINO read these files directly. The LiteRT, ExecuTorch, Core ML and Core AI runtimes need exported artifacts, so the scripts have no rows for them. To benchmark such an artifact, give its `ArtifactBenchmarkRequest` to `run_benchmark_on_artifacts`.
 
 ### Options
@@ -120,9 +147,12 @@ OpenVINO rows read the existing `.onnx` files and compile them on the host, as T
 | Device | Signal |
 |---|---|
 | NVIDIA GPU | NVML clock events. SAB locks the clocks to their maximum during the run. |
+| Jetson GPU | GPU frequency from `/sys/class/devfreq`, polled while the model runs. |
 | x86 Linux CPU | Core frequencies from `/sys/devices/system/cpu/cpu*/cpufreq`, polled while the model runs. |
 | Mac (all devices) | `ProcessInfo.thermalState`, polled during the run. `serious` or higher counts as throttling, because Apple places the performance impact there. |
 | Other | None. The `Throttled` column shows `?`. |
+
+On a Jetson, a GPU frequency below the baseline counts as throttling. This signal is reliable only when `jetson_clocks` holds the GPU at its maximum frequency.
 
 SAB reads the core frequencies only while the model runs. Between images, a scaling governor such as `schedutil` slows the idle cores, and SAB does not count that as throttling. The baseline is the first frequency read during an inference.
 

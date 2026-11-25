@@ -5,6 +5,7 @@ from contextlib import nullcontext
 import pytest
 
 from sab.monitors.cpufreq import CpufreqMonitor
+from sab.monitors.jetson import read_gpu_frequencies
 from sab.monitors.macos import ThermalStateMonitor, read_thermal_state
 from sab.monitors.nvidia import ThrottleMonitor
 
@@ -144,3 +145,14 @@ def test_nvml_did_throttle_raises_when_the_watcher_failed():
     monitor._error = RuntimeError("nvml died")
     with pytest.raises(RuntimeError, match="watcher failed"):
         monitor.did_throttle()
+
+
+def test_gpu_frequencies_come_from_devfreq_in_mhz(tmp_path):
+    gpu = tmp_path / "17000000.gpu"
+    gpu.mkdir()
+    (gpu / "cur_freq").write_text("1267200000\n")
+    assert read_gpu_frequencies(str(tmp_path / "*gpu*" / "cur_freq")) == [1267.2]
+
+
+def test_gpu_frequencies_are_empty_when_the_host_has_no_gpu_devfreq_node(tmp_path):
+    assert read_gpu_frequencies(str(tmp_path / "*gpu*" / "cur_freq")) == []

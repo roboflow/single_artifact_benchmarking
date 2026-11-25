@@ -2,20 +2,24 @@ import platform
 from typing import Callable
 
 from sab.hosts.base import Host, safe
-from sab.hosts.linux import LinuxHost
+from sab.hosts.jetson import JetsonHost, is_jetson
+from sab.hosts.linux import LinuxHost, board_name, read_device_tree_model
 from sab.hosts.macos import MacHost
 from sab.monitors.base import Monitor
 from sab.runtimes.base import Runtime
 
 
-def detect_host(system: str | None = None) -> Host:
-    """The platform of this machine. `system` is a platform.system() name, injectable for tests.
+def detect_host(system: str | None = None, read_board: Callable[[], str] = read_device_tree_model) -> Host:
+    """The platform of this machine. `system` is a platform.system() name.
 
+    `system` and `read_board` are injectable for tests.
     An OS with no platform of its own gets LinuxHost. Its Linux-only sources give no CPU name and no CPU throttle verdict there.
     """
     system = system or platform.system()
     if system == "Darwin":
         return MacHost()
+    if system == "Linux" and is_jetson(board_name(read_board)):
+        return JetsonHost()
     return LinuxHost()
 
 
@@ -47,4 +51,4 @@ def host_info(
     }
 
 
-__all__ = ["Host", "LinuxHost", "MacHost", "detect_host", "host_info", "select_monitor"]
+__all__ = ["Host", "JetsonHost", "LinuxHost", "MacHost", "detect_host", "host_info", "select_monitor"]
