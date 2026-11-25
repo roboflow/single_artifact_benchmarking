@@ -91,7 +91,7 @@ def build_engine(model_path, engine_path, precision="fp32"):
 
 def _ensure_engine(artifact_path: str, precision: str, tensorrt_version: str) -> str:
     """Give the path of the engine for an ONNX artifact, and build the engine when it is missing."""
-    from sab.monitors.nvidia import ThrottleMonitor
+    from sab.hosts import select_monitor
 
     engine_path = engine_path_for(artifact_path, precision, tensorrt_version)
 
@@ -100,7 +100,7 @@ def _ensure_engine(artifact_path: str, precision: str, tensorrt_version: str) ->
         return engine_path
 
     print(f"Building engine for {artifact_path} and saving to {engine_path}...")
-    with ThrottleMonitor() as throttle_monitor:
+    with select_monitor(TRTRuntime, "gpu") as throttle_monitor:
         engine = build_engine(artifact_path, engine_path, precision)
     # After the with block the worker has joined, so the verdict is final.
     if throttle_monitor.did_throttle():

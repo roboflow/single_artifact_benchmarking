@@ -13,6 +13,9 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         python: ["3.10", "3.12"]
     runs-on: ${{ matrix.os }}
+    env:
+      # Without it, `uv run` follows .python-version and replaces the environment of the matrix cell.
+      UV_PYTHON: ${{ matrix.python }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -20,6 +23,6 @@ jobs:
           enable-cache: true
       - name: Install
         # The job does not install the coreai extra. Its wheels need macOS 26 or later and its runtime needs macOS 27, so the Core AI tests skip.
-        run: uv sync --python ${{ matrix.python }} --extra onnx-cpu --extra openvino --extra executorch --extra litert ${{ matrix.os == 'macos-latest' && '--extra coreml' || '' }} --group dev
+        run: uv sync --extra onnx-cpu --extra openvino --extra executorch --extra litert ${{ matrix.os == 'macos-latest' && '--extra coreml' || '' }} --group dev
       - name: Test
         run: uv run pytest -q

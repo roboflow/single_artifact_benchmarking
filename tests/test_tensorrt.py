@@ -3,6 +3,8 @@ import sys
 import pytest
 import torch
 
+from sab import hosts
+from sab.runtimes import tensorrt
 from sab.runtimes.tensorrt import TRTRuntime, builder_flag_names, engine_path_for
 from tests.fakes import make_two_input_model
 
@@ -90,3 +92,38 @@ def test_gpu_rejects_an_input_the_engine_does_not_have(tmp_path):
     runtime = TRTRuntime(make_two_input_model(tmp_path / "m.onnx"), "gpu", "fp32")
     with pytest.raises(ValueError, match="nope"):
         runtime.run({"images": torch.rand(1, 3, 4, 4, device="cuda"), "nope": torch.ones(1, device="cuda")})
+
+
+class RecordingMonitor:
+    def __init__(self):
+        self.entered = False
+
+    def __enter__(self):
+        self.entered = True
+        return self
+
+    def __exit__(self, *exc):
+        return None
+
+    def did_throttle(self):
+        return None
+
+
+def test_an_engine_build_uses_the_throttle_monitor_of_the_host(monkeypatch, tmp_path):
+    """A Jetson without NVML must build an engine, so the build must not go to NVML directly."""
+    monitor = RecordingMonitor()
+    selected = []
+
+    def select_monitor(runtime, device):
+        selected.append((runtime, device))
+        return monitor
+
+    monkeypatch.setattr(hosts, "select_monitor", select_monitor)
+    monkeypatch.setattr(tensorrt, "build_engine", lambda artifact_path, engine_path, precision: object())
+
+    artifact = str(tmp_path / "model.onnx")
+    engine_path = tensorrt._ensure_engine(artifact, "fp16", "10.16.1")
+
+    assert selected == [(TRTRuntime, "gpu")]
+    assert monitor.entered
+    assert engine_path == engine_path_for(artifact, "fp16", "10.16.1")

@@ -79,12 +79,14 @@ uv sync --python 3.12 --extra mac --extra coreai
 
 #### Jetson
 
-SAB supports JetPack 6.2 (Python 3.10) and JetPack 7.2 (Python 3.12). PyPI has no Jetson builds of torch with CUDA, ONNX Runtime with CUDA, or TensorRT. Thus, do not use `uv sync` on a Jetson. Use a Python environment that already has these three packages, and install SAB into it. `uv` keeps the installed packages:
+SAB supports JetPack 6.2 (Python 3.10) and JetPack 7.2 (Python 3.12). PyPI has no Jetson builds of torch with CUDA, ONNX Runtime with CUDA, or TensorRT. Thus, do not use `uv sync` on a Jetson. Use a Python environment that already has these three packages, and install SAB into it. `pip` keeps the installed packages that satisfy the SAB requirements:
 
 ```bash
-uv pip install --system ".[openvino]"
+python3 -m pip install ".[openvino]"
 python3 -m sab.benchmark_all <path to coco val dir> <path to coco val annotations>
 ```
+
+On JetPack 7.2, the system Python is externally managed, so add `--break-system-packages` to the `pip` command.
 
 The Roboflow Inference server image for each JetPack is such an environment. For example, on JetPack 6.2:
 
@@ -92,17 +94,17 @@ The Roboflow Inference server image for each JetPack is such an environment. For
 docker run --rm -it --runtime nvidia -v "$PWD":/sab -w /sab --entrypoint bash roboflow/roboflow-inference-server-jetson-6.2.0
 ```
 
-SAB does not set the Jetson clocks. Before a run, set the maximum power mode and the maximum clocks on the host:
+SAB does not set the Jetson clocks. Before a run, set the maximum power mode and the maximum clocks on the host. The ID of the maximum power mode is different for each module. For example, it is 0 on an AGX Orin and 2 on an Orin Nano Super. Find the ID of your module in `/etc/nvpmodel.conf`:
 
 ```bash
-sudo nvpmodel -m 0
+sudo nvpmodel -m <ID of the maximum mode>
 ```
 
 ```bash
 sudo jetson_clocks
 ```
 
-The results file records the board, the L4T release and the power mode.
+The results file records the board, the L4T release and the power mode. A container hides the device tree and has no `nvpmodel`. There, SAB detects the Jetson from `/etc/nv_tegra_release`, and the board and the power mode are empty.
 
 The benchmark scripts have rows only for the `.onnx` artifacts in the bucket. TensorRT, ONNX Runtime and OpenVINO read these files directly. The LiteRT, ExecuTorch, Core ML and Core AI runtimes need exported artifacts, so the scripts have no rows for them. To benchmark such an artifact, give its `ArtifactBenchmarkRequest` to `run_benchmark_on_artifacts`.
 
