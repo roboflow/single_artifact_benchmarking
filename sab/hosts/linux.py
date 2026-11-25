@@ -8,6 +8,7 @@ from sab.monitors.nvidia import ThrottleMonitor
 from sab.runtimes.base import Runtime
 
 CPUINFO_NAME_KEYS = ("model name", "Model")
+DEVICE_TREE_MODEL_PATH = "/proc/device-tree/model"
 NVML_RUNTIMES = frozenset({"tensorrt", "onnxruntime"})
 
 
@@ -25,6 +26,17 @@ def _read_cpuinfo() -> str:
         return f.read()
 
 
+def read_device_tree_model() -> str:
+    with open(DEVICE_TREE_MODEL_PATH) as f:
+        return f.read()
+
+
+def board_name(read_board: Callable[[], str] = read_device_tree_model) -> str | None:
+    """The board name from the device tree. Arm boards such as a Jetson or a Raspberry Pi have one."""
+    board = safe(read_board)
+    return board.rstrip("\x00\n") if board else None
+
+
 def _read_cuda_gpu_name() -> str | None:
     import torch
 
@@ -37,10 +49,14 @@ def _read_cuda_gpu_name() -> str | None:
 class LinuxHost:
     read_cpuinfo: Callable[[], str] = _read_cpuinfo
     read_gpu_name: Callable[[], str | None] = _read_cuda_gpu_name
+    read_board: Callable[[], str] = read_device_tree_model
 
     def describe(self) -> dict:
         cpuinfo = safe(self.read_cpuinfo)
-        return {"cpu": cpu_name_from_cpuinfo(cpuinfo) if cpuinfo else None}
+        return {
+            "cpu": cpu_name_from_cpuinfo(cpuinfo) if cpuinfo else None,
+            "board": board_name(self.read_board),
+        }
 
     def accelerator(self, device: str) -> str | None:
         return safe(self.read_gpu_name) if device == "gpu" else None

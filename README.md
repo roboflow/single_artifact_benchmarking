@@ -77,6 +77,57 @@ On macOS 27, add the `coreai` extra for Core AI. The `coreai-core` wheels exist 
 uv sync --python 3.12 --extra mac --extra coreai
 ```
 
+#### Jetson
+
+SAB supports JetPack 5.1.1, JetPack 6.2 and JetPack 7.2. PyPI has no Jetson builds of torch with CUDA or ONNX Runtime with CUDA. Thus, do not use `uv sync` on a Jetson. Run SAB in the Roboflow Inference server image for your JetPack, which already has these packages:
+
+| JetPack | Image | Python | TensorRT | More steps |
+|---|---|---|---|---|
+| 5.1.1 | `roboflow/roboflow-inference-server-jetson-5.1.1` | 3.12 | 10.8 | Add `-e PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=upb` to the `docker run` command. With the value that the image sets, `import onnx` fails. |
+| 6.2 | `roboflow/roboflow-inference-server-jetson-6.2.0` | 3.10 | 10.7 | None. |
+| 7.2 | `roboflow/roboflow-inference-server-jetson-7.2.0` | 3.12 | 11.4 | SAB does not support TensorRT 11, and the image has no `pip`. Use the install commands for JetPack 7.2. |
+
+For example, start the image for JetPack 6.2:
+
+```bash
+docker run --rm -it --runtime nvidia -v "$PWD":/sab -w /sab --entrypoint bash roboflow/roboflow-inference-server-jetson-6.2.0
+```
+
+In the container, install SAB with no extra. `pip` keeps the installed packages that satisfy the SAB requirements, and SAB uses the TensorRT and ONNX Runtime packages of the image:
+
+```bash
+python3 -m pip install .
+```
+
+On JetPack 7.2, use these install commands instead:
+
+```bash
+apt-get update && apt-get install -y --no-install-recommends python3-pip
+python3 -m pip install --break-system-packages ".[tensorrt]"
+```
+
+The `tensorrt` extra installs TensorRT 10 next to the TensorRT 11 of the image. Python then imports TensorRT 10, so all hosts build their engines with the same major version.
+
+Then run the benchmarks:
+
+```bash
+python3 -m sab.benchmark_all <path to coco val dir> <path to coco val annotations>
+```
+
+To add the OpenVINO CPU rows, add the `openvino` extra to the install command: `".[openvino]"`, or `".[tensorrt,openvino]"` on JetPack 7.2.
+
+SAB does not set the Jetson clocks. Before a run, set the maximum power mode and the maximum clocks on the host. The ID of the maximum power mode is different for each module. For example, it is 0 on an AGX Orin and 2 on an Orin Nano Super. Find the ID of your module in `/etc/nvpmodel.conf`:
+
+```bash
+sudo nvpmodel -m <ID of the maximum mode>
+```
+
+```bash
+sudo jetson_clocks
+```
+
+The results file records the board, the L4T release and the power mode. A container hides the device tree and has no `nvpmodel`. There, SAB detects the Jetson from `/etc/nv_tegra_release` or from the `RUNNING_ON_JETSON` variable that the Inference images set. The board and the power mode are then empty, and the L4T release is empty when the container does not have that file.
+
 The benchmark scripts have rows only for the `.onnx` artifacts in the bucket. TensorRT, ONNX Runtime and OpenVINO read these files directly. The LiteRT, ExecuTorch, Core ML and Core AI runtimes need exported artifacts, so the scripts have no rows for them. To benchmark such an artifact, give its `ArtifactBenchmarkRequest` to `run_benchmark_on_artifacts`.
 
 ### Options
@@ -120,9 +171,12 @@ OpenVINO rows read the existing `.onnx` files and compile them on the host, as T
 | Device | Signal |
 |---|---|
 | NVIDIA GPU | NVML clock events. SAB locks the clocks to their maximum during the run. |
+| Jetson GPU | GPU frequency from `/sys/class/devfreq`, polled while the model runs. |
 | x86 Linux CPU | Core frequencies from `/sys/devices/system/cpu/cpu*/cpufreq`, polled while the model runs. |
 | Mac (all devices) | `ProcessInfo.thermalState`, polled during the run. `serious` or higher counts as throttling, because Apple places the performance impact there. |
 | Other | None. The `Throttled` column shows `?`. |
+
+On a Jetson, a GPU frequency below the baseline counts as throttling. This signal is reliable only when `jetson_clocks` holds the GPU at its maximum frequency.
 
 SAB reads the core frequencies only while the model runs. Between images, a scaling governor such as `schedutil` slows the idle cores, and SAB does not count that as throttling. The baseline is the first frequency read during an inference.
 

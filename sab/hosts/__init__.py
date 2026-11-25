@@ -2,6 +2,7 @@ import platform
 from typing import Callable
 
 from sab.hosts.base import Host, safe
+from sab.hosts.jetson import JetsonHost, on_jetson
 from sab.hosts.linux import LinuxHost
 from sab.hosts.macos import MacHost
 from sab.monitors.base import Monitor
@@ -16,6 +17,8 @@ def detect_host(system: str | None = None) -> Host:
     system = system or platform.system()
     if system == "Darwin":
         return MacHost()
+    if system == "Linux" and on_jetson():
+        return JetsonHost()
     return LinuxHost()
 
 
@@ -47,4 +50,4 @@ def host_info(
     }
 
 
-__all__ = ["Host", "LinuxHost", "MacHost", "detect_host", "host_info", "select_monitor"]
+__all__ = ["Host", "JetsonHost", "LinuxHost", "MacHost", "detect_host", "host_info", "select_monitor"]

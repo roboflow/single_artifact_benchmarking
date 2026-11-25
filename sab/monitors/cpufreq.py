@@ -2,7 +2,9 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from glob import glob
-from typing import Callable, Self
+from typing import Callable
+
+from typing_extensions import Self
 
 CPUFREQ_CURRENT_GLOB = "/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq"
 

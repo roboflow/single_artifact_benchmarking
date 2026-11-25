@@ -1,5 +1,7 @@
 from contextlib import AbstractContextManager, nullcontext
-from typing import Protocol, Self
+from typing import Protocol
+
+from typing_extensions import Self
 
 
 class Monitor(Protocol):
