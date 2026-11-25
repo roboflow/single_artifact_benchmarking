@@ -5,7 +5,7 @@ from contextlib import nullcontext
 import pytest
 
 from sab.monitors.cpufreq import CpufreqMonitor
-from sab.monitors.jetson import read_gpu_frequencies
+from sab.monitors.jetson import GPU_DEVFREQ_CURRENT_GLOBS, read_gpu_frequencies
 from sab.monitors.macos import ThermalStateMonitor, read_thermal_state
 from sab.monitors.nvidia import ThrottleMonitor
 
@@ -154,13 +154,23 @@ def test_gpu_frequencies_come_from_devfreq_in_mhz(tmp_path):
     assert read_gpu_frequencies((str(tmp_path / "*gpu*" / "cur_freq"),)) == [1267.2]
 
 
-def test_gpu_frequencies_come_from_the_node_name_of_each_jetpack(tmp_path):
-    """The Orin GPU node is `17000000.gpu` on JetPack 6 and `17000000.ga10b` on JetPack 5."""
-    gpu = tmp_path / "17000000.ga10b"
+@pytest.mark.parametrize("node", ["17000000.gpu", "17000000.ga10b", "17000000.gv11b"])
+def test_the_default_patterns_find_the_gpu_node_of_each_jetson(tmp_path, node):
+    """Orin: `17000000.gpu` on JetPack 6, `17000000.ga10b` on JetPack 5. Xavier: `17000000.gv11b`."""
+    gpu = tmp_path / node
     gpu.mkdir()
     (gpu / "cur_freq").write_text("998400000\n")
-    patterns = (str(tmp_path / "*gpu*" / "cur_freq"), str(tmp_path / "*ga10b*" / "cur_freq"))
+    patterns = tuple(pattern.replace("/sys/class/devfreq", str(tmp_path)) for pattern in GPU_DEVFREQ_CURRENT_GLOBS)
+    assert patterns != GPU_DEVFREQ_CURRENT_GLOBS
     assert read_gpu_frequencies(patterns) == [998.4]
+
+
+def test_a_gpu_node_that_matches_two_patterns_is_read_one_time(tmp_path):
+    gpu = tmp_path / "17000000.gpu"
+    gpu.mkdir()
+    (gpu / "cur_freq").write_text("998400000\n")
+    pattern = str(tmp_path / "*gpu*" / "cur_freq")
+    assert read_gpu_frequencies((pattern, pattern)) == [998.4]
 
 
 def test_gpu_frequencies_are_empty_when_the_host_has_no_gpu_devfreq_node(tmp_path):
