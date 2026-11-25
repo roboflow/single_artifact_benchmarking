@@ -79,7 +79,7 @@ uv sync --python 3.12 --extra mac --extra coreai
 
 #### Jetson
 
-SAB supports JetPack 6.2 (Python 3.10) and JetPack 7.2 (Python 3.12). PyPI has no Jetson builds of torch with CUDA, ONNX Runtime with CUDA, or TensorRT. Thus, do not use `uv sync` on a Jetson. Use a Python environment that already has these three packages, and install SAB into it with no extra. `pip` keeps the installed packages that satisfy the SAB requirements, and SAB uses the TensorRT and ONNX Runtime packages of that environment:
+SAB supports JetPack 5.1.1, JetPack 6.2 and JetPack 7.2. PyPI has no Jetson builds of torch with CUDA, ONNX Runtime with CUDA, or TensorRT. Thus, do not use `uv sync` on a Jetson. Use a Python environment that already has these three packages, and install SAB into it with no extra. `pip` keeps the installed packages that satisfy the SAB requirements, and SAB uses the TensorRT and ONNX Runtime packages of that environment:
 
 ```bash
 python3 -m pip install .
@@ -90,7 +90,7 @@ To add the OpenVINO CPU rows, install `".[openvino]"`.
 
 On JetPack 7.2, the system Python is externally managed, so add `--break-system-packages` to the `pip` command.
 
-The Roboflow Inference server image for each JetPack is such an environment. For example, on JetPack 6.2:
+The Roboflow Inference server image for each JetPack is such an environment. The images for JetPack 5.1.1 and 7.2 have Python 3.12, and the image for JetPack 6.2 has Python 3.10. For example, on JetPack 6.2:
 
 ```bash
 docker run --rm -it --runtime nvidia -v "$PWD":/sab -w /sab --entrypoint bash roboflow/roboflow-inference-server-jetson-6.2.0
