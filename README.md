@@ -79,7 +79,13 @@ uv sync --python 3.12 --extra mac --extra coreai
 
 #### Jetson
 
-SAB supports JetPack 5.1.1, JetPack 6.2 and JetPack 7.2. PyPI has no Jetson builds of torch with CUDA, ONNX Runtime with CUDA, or TensorRT. Thus, do not use `uv sync` on a Jetson. Use a Python environment that already has these three packages, and install SAB into it with no extra. `pip` keeps the installed packages that satisfy the SAB requirements, and SAB uses the TensorRT and ONNX Runtime packages of that environment:
+SAB supports JetPack 5.1.1, JetPack 6.2 and JetPack 7.2. PyPI has no Jetson builds of torch with CUDA or ONNX Runtime with CUDA. Thus, do not use `uv sync` on a Jetson. Run SAB in the Roboflow Inference server image for your JetPack, which already has these packages. For example, on JetPack 6.2:
+
+```bash
+docker run --rm -it --runtime nvidia -v "$PWD":/sab -w /sab --entrypoint bash roboflow/roboflow-inference-server-jetson-6.2.0
+```
+
+In the container, install SAB with no extra, then run the benchmarks. `pip` keeps the installed packages that satisfy the SAB requirements, and SAB uses the TensorRT and ONNX Runtime packages of the image:
 
 ```bash
 python3 -m pip install .
@@ -88,13 +94,22 @@ python3 -m sab.benchmark_all <path to coco val dir> <path to coco val annotation
 
 To add the OpenVINO CPU rows, install `".[openvino]"`.
 
-On JetPack 7.2, the system Python is externally managed, so add `--break-system-packages` to the `pip` command.
+SAB needs TensorRT 10. Two of the images need more steps:
 
-The Roboflow Inference server image for each JetPack is such an environment. The images for JetPack 5.1.1 and 7.2 have Python 3.12, and the image for JetPack 6.2 has Python 3.10. For example, on JetPack 6.2:
+| JetPack | Image | Python | TensorRT | More steps |
+|---|---|---|---|---|
+| 5.1.1 | `roboflow/roboflow-inference-server-jetson-5.1.1` | 3.12 | 10.8 | Add `-e PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=upb` to the `docker run` command. With the value that the image sets, `import onnx` fails. |
+| 6.2 | `roboflow/roboflow-inference-server-jetson-6.2.0` | 3.10 | 10.7 | None. |
+| 7.2 | `roboflow/roboflow-inference-server-jetson-7.2.0` | 3.12 | 11.4 | The image has no `pip`, and it has TensorRT 11. Install `pip`, then install SAB with the `tensorrt` extra. |
+
+On JetPack 7.2, use these commands for the install:
 
 ```bash
-docker run --rm -it --runtime nvidia -v "$PWD":/sab -w /sab --entrypoint bash roboflow/roboflow-inference-server-jetson-6.2.0
+apt-get update && apt-get install -y python3-pip
+python3 -m pip install --break-system-packages --extra-index-url https://pypi.nvidia.com ".[tensorrt]"
 ```
+
+The `tensorrt` extra installs TensorRT 10 next to the TensorRT 11 of the image. Python then imports TensorRT 10, so all hosts build their engines with the same major version.
 
 SAB does not set the Jetson clocks. Before a run, set the maximum power mode and the maximum clocks on the host. The ID of the maximum power mode is different for each module. For example, it is 0 on an AGX Orin and 2 on an Orin Nano Super. Find the ID of your module in `/etc/nvpmodel.conf`:
 
