@@ -105,6 +105,13 @@ def saved_paths(output) -> list[str]:
     return [row["artifact_request"]["artifact_path"] for row in load_results(str(output))]
 
 
+@pytest.mark.parametrize("device", ["cpu", "gpu"])
+def test_the_host_record_of_a_row_describes_the_device_of_that_row(harness, monkeypatch, device):
+    monkeypatch.setattr(runner, "host_info", lambda runtime, row_device: {"device": row_device})
+    row = run_benchmark_on_artifact(make_request(device=device), "images", "ann.json")
+    assert row["host"] == {"device": device}
+
+
 def test_single_row_builds_the_pipeline_from_the_request(harness):
     request = make_request(normalized_in_graph=True, needs_class_remapping=True, max_images=3, max_dets=50, buffer_time=0.5)
 

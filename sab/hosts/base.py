@@ -12,7 +12,10 @@ class Host(Protocol):
         ...
 
     def accelerator(self, device: str) -> str | None:
-        """The hardware that runs a `device` row. None for a CPU row, because `cpu` already names it."""
+        """The hardware that runs a `device` row. A failed read gives None, never an error.
+
+        Also None for a CPU row, because `cpu` already names it, and for a device with no reader on this platform.
+        """
         ...
 
     def monitor(self, runtime: type[Runtime], device: str) -> Monitor:

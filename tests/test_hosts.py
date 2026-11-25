@@ -1,7 +1,9 @@
+import platform
 from typing import ClassVar
 
 import pytest
 
+from sab import hosts
 from sab.hosts import LinuxHost, MacHost, detect_host, host_info, select_monitor
 from sab.hosts.linux import cpu_name_from_cpuinfo
 from sab.monitors import CpufreqMonitor, NullMonitor, ThermalStateMonitor, ThrottleMonitor
@@ -88,6 +90,12 @@ def test_the_accelerator_on_macos_is_the_chip_only_for_a_gpu_or_npu_row(device, 
     assert info["cpu"] == "Apple M4 Pro"
 
 
+def test_host_info_detects_the_platform_from_the_system_reader(monkeypatch):
+    monkeypatch.setattr(hosts, "MacHost", lambda: MacHost(read_sysctl=lambda key: "Apple M4 Pro"))
+    info = host_info(FakeRuntime, "gpu", system=lambda: ("Darwin", "27.0.0"))
+    assert info["cpu"] == "Apple M4 Pro"
+
+
 @pytest.mark.parametrize("system, expected", [("Darwin", MacHost), ("Linux", LinuxHost), ("Windows", LinuxHost)])
 def test_detect_host(system, expected):
     assert type(detect_host(system)) is expected
@@ -107,6 +115,7 @@ def runtime_named(runtime_name: str) -> type[FakeRuntime]:
         ("onnxruntime", "gpu", ThrottleMonitor),
         ("onnxruntime", "cpu", CpufreqMonitor),
         ("coreml", "gpu", NullMonitor),
+        ("executorch", "npu", NullMonitor),
     ],
 )
 def test_linux_selects_the_monitor_from_the_runtime_and_the_device(runtime_name, device, expected):
@@ -116,3 +125,8 @@ def test_linux_selects_the_monitor_from_the_runtime_and_the_device(runtime_name,
 @pytest.mark.parametrize("device", ["cpu", "gpu", "npu"])
 def test_macos_selects_the_thermal_state_monitor_for_every_device(device):
     assert type(select_monitor(runtime_named("coreml"), device, host=MacHost())) is ThermalStateMonitor
+
+
+def test_select_monitor_detects_the_platform_of_this_machine():
+    expected = ThermalStateMonitor if platform.system() == "Darwin" else CpufreqMonitor
+    assert type(select_monitor(runtime_named("onnxruntime"), "cpu")) is expected
