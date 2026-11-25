@@ -224,9 +224,9 @@ def test_a_jetson_gpu_row_watches_the_gpu_frequency_and_not_nvml(runtime_name):
     reads = []
     host = JetsonHost(read_gpu_frequencies=lambda: reads.append(1) or [1267.2])
     monitor = select_monitor(runtime_named(runtime_name), "gpu", host=host)
-    assert type(monitor) is CpufreqMonitor
     with monitor:
         pass
+    assert type(monitor) is CpufreqMonitor
     assert reads, "the monitor of a GPU row must read the GPU frequency"
 
 
