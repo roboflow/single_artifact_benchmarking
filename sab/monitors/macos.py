@@ -3,7 +3,9 @@ import ctypes.util
 import threading
 from contextlib import AbstractContextManager, nullcontext
 from functools import cache
-from typing import Callable, Self
+from typing import Callable
+
+from typing_extensions import Self
 
 FOUNDATION_PATH = "/System/Library/Frameworks/Foundation.framework/Foundation"
 STATE_NAMES = ("nominal", "fair", "serious", "critical")
