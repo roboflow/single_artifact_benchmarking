@@ -127,6 +127,11 @@ def test_host_info_detects_the_platform_from_the_system_reader(monkeypatch, syst
     assert info["cpu"] == expected_cpu
 
 
+def test_the_image_flag_comes_from_the_process_environment(monkeypatch):
+    monkeypatch.setenv("RUNNING_ON_JETSON", "True")
+    assert on_jetson(read_board=no_board, read_l4t_release=no_l4t_release) is True
+
+
 @pytest.mark.parametrize("system, expected", [("Darwin", MacHost), ("Linux", LinuxHost), ("Windows", LinuxHost)])
 def test_detect_host(system, expected):
     assert type(detect_host(system)) is expected
@@ -231,10 +236,11 @@ def test_a_jetson_gpu_row_watches_the_gpu_frequency_and_not_nvml(runtime_name):
 
 
 @pytest.mark.parametrize("device, expected", [("cpu", CpufreqMonitor), ("npu", NullMonitor)])
-def test_a_jetson_row_off_the_gpu_selects_the_linux_monitor(device, expected):
+def test_a_jetson_row_off_the_gpu_selects_the_linux_monitor(monkeypatch, device, expected):
     def must_not_run():
         raise AssertionError("the GPU reader ran for a row off the GPU")
 
+    monkeypatch.setattr("sab.hosts.linux.CpufreqMonitor", lambda: CpufreqMonitor(read_frequencies=lambda: []))
     host = JetsonHost(read_gpu_frequencies=must_not_run)
     monitor = select_monitor(runtime_named("onnxruntime"), device, host=host)
     with monitor:
