@@ -79,12 +79,14 @@ uv sync --python 3.12 --extra mac --extra coreai
 
 #### Jetson
 
-SAB supports JetPack 6.2 (Python 3.10) and JetPack 7.2 (Python 3.12). PyPI has no Jetson builds of torch with CUDA, ONNX Runtime with CUDA, or TensorRT. Thus, do not use `uv sync` on a Jetson. Use a Python environment that already has these three packages, and install SAB into it. `pip` keeps the installed packages that satisfy the SAB requirements:
+SAB supports JetPack 6.2 (Python 3.10) and JetPack 7.2 (Python 3.12). PyPI has no Jetson builds of torch with CUDA, ONNX Runtime with CUDA, or TensorRT. Thus, do not use `uv sync` on a Jetson. Use a Python environment that already has these three packages, and install SAB into it with no extra. `pip` keeps the installed packages that satisfy the SAB requirements, and SAB uses the TensorRT and ONNX Runtime packages of that environment:
 
 ```bash
-python3 -m pip install ".[openvino]"
+python3 -m pip install .
 python3 -m sab.benchmark_all <path to coco val dir> <path to coco val annotations>
 ```
+
+To add the OpenVINO CPU rows, install `".[openvino]"`.
 
 On JetPack 7.2, the system Python is externally managed, so add `--break-system-packages` to the `pip` command.
 
