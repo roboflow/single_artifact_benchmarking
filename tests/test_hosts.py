@@ -136,22 +136,26 @@ def test_detect_host_gives_the_jetson_platform_only_on_linux(monkeypatch):
     monkeypatch.setattr(hosts, "on_jetson", lambda: True)
     assert type(detect_host("Linux")) is JetsonHost
     assert type(detect_host("Darwin")) is MacHost
+    assert type(detect_host("Windows")) is LinuxHost
 
 
 @pytest.mark.parametrize(
-    "read_board, read_l4t_release, expected",
+    "read_board, read_l4t_release, environ, expected",
     [
-        (lambda: JETSON_BOARD, no_l4t_release, True),
-        (lambda: PI_BOARD, no_l4t_release, False),
-        (no_board, no_l4t_release, False),
-        # A container hides the device tree, but the NVIDIA runtime mounts the L4T release file.
-        (no_board, lambda: L4T_RELEASE, True),
-        (lambda: "Vendor carrier board\x00", lambda: L4T_RELEASE, True),
-        (no_board, lambda: "not a release line", False),
+        (lambda: JETSON_BOARD, no_l4t_release, {}, True),
+        (lambda: PI_BOARD, no_l4t_release, {}, False),
+        (no_board, no_l4t_release, {}, False),
+        # A container hides the device tree. The NVIDIA runtime can mount the L4T release file.
+        (no_board, lambda: L4T_RELEASE, {}, True),
+        (lambda: "Vendor carrier board\x00", lambda: L4T_RELEASE, {}, True),
+        (no_board, lambda: "not a release line", {}, False),
+        # The Roboflow Inference images for a Jetson set this variable.
+        (no_board, no_l4t_release, {"RUNNING_ON_JETSON": "True"}, True),
+        (no_board, no_l4t_release, {"RUNNING_ON_JETSON": "False"}, False),
     ],
 )
-def test_a_jetson_is_known_by_its_board_name_or_its_l4t_release(read_board, read_l4t_release, expected):
-    assert on_jetson(read_board=read_board, read_l4t_release=read_l4t_release) is expected
+def test_a_jetson_is_known_by_its_board_name_its_l4t_release_or_its_image(read_board, read_l4t_release, environ, expected):
+    assert on_jetson(read_board=read_board, read_l4t_release=read_l4t_release, environ=environ) is expected
 
 
 def test_a_linux_board_with_a_device_tree_records_its_board_name():
@@ -232,7 +236,10 @@ def test_a_jetson_row_off_the_gpu_selects_the_linux_monitor(device, expected):
         raise AssertionError("the GPU reader ran for a row off the GPU")
 
     host = JetsonHost(read_gpu_frequencies=must_not_run)
-    assert type(select_monitor(runtime_named("onnxruntime"), device, host=host)) is expected
+    monitor = select_monitor(runtime_named("onnxruntime"), device, host=host)
+    with monitor:
+        pass
+    assert type(monitor) is expected
 
 
 @pytest.mark.parametrize("system, expected", [("Darwin", ThermalStateMonitor), ("Linux", CpufreqMonitor)])

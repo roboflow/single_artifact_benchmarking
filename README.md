@@ -104,7 +104,7 @@ sudo nvpmodel -m <ID of the maximum mode>
 sudo jetson_clocks
 ```
 
-The results file records the board, the L4T release and the power mode. A container hides the device tree and has no `nvpmodel`. There, SAB detects the Jetson from `/etc/nv_tegra_release`, and the board and the power mode are empty.
+The results file records the board, the L4T release and the power mode. A container hides the device tree and has no `nvpmodel`. There, SAB detects the Jetson from `/etc/nv_tegra_release` or from the `RUNNING_ON_JETSON` variable that the Inference images set. The board and the power mode are then empty, and the L4T release is empty when the container does not have that file.
 
 The benchmark scripts have rows only for the `.onnx` artifacts in the bucket. TensorRT, ONNX Runtime and OpenVINO read these files directly. The LiteRT, ExecuTorch, Core ML and Core AI runtimes need exported artifacts, so the scripts have no rows for them. To benchmark such an artifact, give its `ArtifactBenchmarkRequest` to `run_benchmark_on_artifacts`.
 

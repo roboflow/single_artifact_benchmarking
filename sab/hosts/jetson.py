@@ -1,5 +1,7 @@
+import os
 import re
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -13,6 +15,7 @@ from sab.runtimes.base import Runtime
 L4T_RELEASE_PATH = "/etc/nv_tegra_release"
 L4T_RELEASE_PATTERN = re.compile(r"R(\d+) \(release\), REVISION: ([\d.]+)")
 POWER_MODE_PATTERN = re.compile(r"NV Power Mode: (\S+)")
+INFERENCE_IMAGE_JETSON_FLAG = "RUNNING_ON_JETSON"
 
 
 def l4t_release_from_nv_tegra_release(text: str) -> str | None:
@@ -37,16 +40,20 @@ def _read_power_mode() -> str:
 def on_jetson(
     read_board: Callable[[], str] = read_device_tree_model,
     read_l4t_release: Callable[[], str] = _read_l4t_release,
+    environ: Mapping[str, str] = os.environ,
 ) -> bool:
-    """True on a Jetson: the board name says so, or the L4T release file exists.
+    """True on a Jetson: the board name says so, the L4T release file gives a release, or the image says so.
 
-    A container hides the device tree, but the NVIDIA container runtime mounts the L4T release file.
+    A container hides the device tree. The NVIDIA container runtime can mount the L4T release file,
+    and the Roboflow Inference images for a Jetson set a flag.
     """
     board = board_name(read_board)
     if board is not None and "Jetson" in board:
         return True
     l4t_release = safe(read_l4t_release)
-    return bool(l4t_release) and l4t_release_from_nv_tegra_release(l4t_release) is not None
+    if l4t_release and l4t_release_from_nv_tegra_release(l4t_release) is not None:
+        return True
+    return environ.get(INFERENCE_IMAGE_JETSON_FLAG, "").lower() == "true"
 
 
 @dataclass(frozen=True)
