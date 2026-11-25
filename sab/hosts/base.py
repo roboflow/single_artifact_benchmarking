@@ -11,6 +11,10 @@ class Host(Protocol):
         """The platform fields of the host record. A reader that fails gives None, never an error."""
         ...
 
+    def accelerator(self, device: str) -> str | None:
+        """The hardware that runs a `device` row. None for a CPU row, because `cpu` already names it."""
+        ...
+
     def monitor(self, runtime: type[Runtime], device: str) -> Monitor:
         """The throttle monitor for a run of `runtime` on `device`."""
         ...

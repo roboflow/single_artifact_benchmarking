@@ -40,10 +40,10 @@ class LinuxHost:
 
     def describe(self) -> dict:
         cpuinfo = safe(self.read_cpuinfo)
-        return {
-            "cpu": cpu_name_from_cpuinfo(cpuinfo) if cpuinfo else None,
-            "accelerator": safe(self.read_gpu_name),
-        }
+        return {"cpu": cpu_name_from_cpuinfo(cpuinfo) if cpuinfo else None}
+
+    def accelerator(self, device: str) -> str | None:
+        return safe(self.read_gpu_name) if device == "gpu" else None
 
     def monitor(self, runtime: type[Runtime], device: str) -> Monitor:
         if device == "gpu" and runtime.name in NVML_RUNTIMES:

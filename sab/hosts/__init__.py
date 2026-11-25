@@ -29,18 +29,20 @@ def _system() -> tuple[str, str]:
 
 def host_info(
     runtime: type[Runtime],
+    device: str,
     *,
     host: Host | None = None,
     system: Callable[[], tuple[str, str]] = _system,
     machine: Callable[[], str] = platform.machine,
 ) -> dict:
-    """Describe the host for the results file. A reader that fails gives None, never an error."""
+    """Describe the host of a `device` row for the results file. A reader that fails gives None, never an error."""
     os_name, os_release = safe(system) or (None, None)
     host = host or detect_host(os_name)
     return {
         "os": f"{os_name} {os_release}" if os_name else None,
         "arch": safe(machine),
         **host.describe(),
+        "accelerator": host.accelerator(device),
         "runtime_version": safe(runtime.version),
     }
 

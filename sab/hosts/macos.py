@@ -17,9 +17,15 @@ def _read_sysctl(key: str) -> str | None:
 class MacHost:
     read_sysctl: Callable[[str], str | None] = _read_sysctl
 
+    def _chip(self) -> str | None:
+        return safe(self.read_sysctl, "machdep.cpu.brand_string")
+
     def describe(self) -> dict:
-        chip = safe(self.read_sysctl, "machdep.cpu.brand_string")
-        return {"cpu": chip, "accelerator": chip}
+        return {"cpu": self._chip()}
+
+    def accelerator(self, device: str) -> str | None:
+        # The GPU and the Neural Engine are part of the Apple silicon chip.
+        return self._chip() if device in ("gpu", "npu") else None
 
     def monitor(self, runtime: type[Runtime], device: str) -> Monitor:
         return ThermalStateMonitor()

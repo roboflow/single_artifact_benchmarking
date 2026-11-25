@@ -20,6 +20,7 @@ def test_cpu_name_reads_model_name_on_x86_and_model_on_a_pi():
 def test_host_info_on_linux_with_a_gpu():
     info = host_info(
         FakeRuntime,
+        "gpu",
         host=LinuxHost(read_cpuinfo=lambda: CPUINFO_X86, read_gpu_name=lambda: "NVIDIA RTX 4090"),
         system=lambda: ("Linux", "6.12.0"),
         machine=lambda: "x86_64",
@@ -36,6 +37,7 @@ def test_host_info_on_linux_with_a_gpu():
 def test_host_info_on_macos_uses_sysctl_for_cpu_and_accelerator():
     info = host_info(
         FakeRuntime,
+        "npu",
         host=MacHost(read_sysctl=lambda key: "Apple M4 Pro"),
         system=lambda: ("Darwin", "27.0.0"),
         machine=lambda: "arm64",
@@ -55,6 +57,7 @@ def test_a_failed_read_gives_none_and_never_raises():
 
     info = host_info(
         BrokenVersionRuntime,
+        "gpu",
         host=LinuxHost(read_cpuinfo=fail, read_gpu_name=fail),
         system=fail,
         machine=fail,
@@ -66,7 +69,23 @@ def test_a_failed_sysctl_read_on_macos_gives_none():
     def fail(*_):
         raise RuntimeError("no access")
 
-    assert MacHost(read_sysctl=fail).describe() == {"cpu": None, "accelerator": None}
+    info = host_info(FakeRuntime, "gpu", host=MacHost(read_sysctl=fail))
+    assert info["cpu"] is None
+    assert info["accelerator"] is None
+
+
+@pytest.mark.parametrize("device, expected", [("gpu", "NVIDIA RTX 4090"), ("cpu", None), ("npu", None)])
+def test_the_accelerator_on_linux_is_the_cuda_gpu_only_for_a_gpu_row(device, expected):
+    host = LinuxHost(read_cpuinfo=lambda: CPUINFO_X86, read_gpu_name=lambda: "NVIDIA RTX 4090")
+    assert host_info(FakeRuntime, device, host=host)["accelerator"] == expected
+
+
+@pytest.mark.parametrize("device, expected", [("gpu", "Apple M4 Pro"), ("npu", "Apple M4 Pro"), ("cpu", None)])
+def test_the_accelerator_on_macos_is_the_chip_only_for_a_gpu_or_npu_row(device, expected):
+    host = MacHost(read_sysctl=lambda key: "Apple M4 Pro")
+    info = host_info(FakeRuntime, device, host=host)
+    assert info["accelerator"] == expected
+    assert info["cpu"] == "Apple M4 Pro"
 
 
 @pytest.mark.parametrize("system, expected", [("Darwin", MacHost), ("Linux", LinuxHost), ("Windows", LinuxHost)])

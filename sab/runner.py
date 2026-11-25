@@ -65,7 +65,7 @@ def run_benchmark_on_artifact(
 def _row(request: ArtifactBenchmarkRequest, accuracy_stats, latency_stats, throttled) -> dict:
     return {
         "artifact_request": request.dump(),
-        "host": host_info(runtime_class(request.runtime)),
+        "host": host_info(runtime_class(request.runtime), request.device),
         "accuracy_stats": accuracy_stats,
         "latency_stats": latency_stats,
         "throttled": throttled,
