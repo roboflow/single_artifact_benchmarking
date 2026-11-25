@@ -3,9 +3,8 @@ from typing import Iterable
 
 from sab.artifacts import ensure_artifact
 from sab.evaluation import evaluate
-from sab.host import host_info
+from sab.hosts import host_info, select_monitor
 from sab.models.utils import get_coco_class_index_mapping
-from sab.monitors import select_monitor
 from sab.processors import Pipeline
 from sab.request import ArtifactBenchmarkRequest
 from sab.results import load_results, result_key, save_results
@@ -66,7 +65,7 @@ def run_benchmark_on_artifact(
 def _row(request: ArtifactBenchmarkRequest, accuracy_stats, latency_stats, throttled) -> dict:
     return {
         "artifact_request": request.dump(),
-        "host": host_info(runtime_class(request.runtime)),
+        "host": host_info(runtime_class(request.runtime), request.device),
         "accuracy_stats": accuracy_stats,
         "latency_stats": latency_stats,
         "throttled": throttled,
